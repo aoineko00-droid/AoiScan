@@ -251,7 +251,7 @@ final class OCRIndexManager:ObservableObject {
 
         let request = IndexRequest(
             documentID:documentID,
-            title:document.title ?? "未命名文档",
+            title:document.title ?? L10n.text("未命名文档"),
             pages:pages,
             force:force,
             belongsToBatch:belongsToBatch

@@ -81,6 +81,7 @@ struct ScanButton: View {
             
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("扫描")
         .onAppear {
             
             withAnimation(

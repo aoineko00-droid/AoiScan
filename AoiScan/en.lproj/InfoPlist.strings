@@ -1,0 +1,2 @@
+"NSCameraUsageDescription" = "AoiScan needs camera access to scan documents.";
+"NSPhotoLibraryAddUsageDescription" = "Allow AoiScan to save exported images to your photo library.";

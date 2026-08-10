@@ -9,6 +9,9 @@ import UIKit
 
 struct AppSettingsView:View {
 
+    @AppStorage(AppLanguage.storageKey)
+    private var appLanguage = AppLanguage.simplifiedChinese.rawValue
+
     @AppStorage("recognition.smallDocumentFallback")
     private var smallDocumentFallbackEnabled = true
 
@@ -33,6 +36,25 @@ struct AppSettingsView:View {
 
     var body:some View {
         Form {
+            Section("语言") {
+                Picker(
+                    "界面语言",
+                    selection:$appLanguage
+                ) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.displayName)
+                            .tag(language.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(
+                    "选择后会立即切换 AoiScan 自有界面的语言。系统分享菜单、键盘和权限弹窗仍跟随 iOS 的语言设置。"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+
             Section("拍摄") {
                 Toggle(
                     "默认开启闪光灯",
@@ -112,8 +134,12 @@ struct AppSettingsView:View {
                         Text(
                             ocrIndexManager.batchCompleted
                                 >= ocrIndexManager.batchTotal
-                            ? "已有扫描件索引已完成"
-                            : "正在处理 \(ocrIndexManager.batchCompleted) / \(ocrIndexManager.batchTotal)"
+                            ? L10n.text("已有扫描件索引已完成")
+                            : L10n.format(
+                                "正在处理 %@ / %@",
+                                String(ocrIndexManager.batchCompleted),
+                                String(ocrIndexManager.batchTotal)
+                            )
                         )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -221,7 +247,7 @@ struct RecognitionLogView:View {
                 List(logStore.entries) { entry in
                     VStack(alignment:.leading, spacing:6) {
                         HStack(spacing:8) {
-                            Text(entry.category)
+                            Text(L10n.text(entry.category))
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(
                                     entry.level == "警告"
@@ -244,7 +270,7 @@ struct RecognitionLogView:View {
                             .foregroundStyle(.secondary)
                         }
 
-                        Text(entry.message)
+                        Text(L10n.text(entry.message))
                             .font(.subheadline)
 
                         if let details = entry.details,

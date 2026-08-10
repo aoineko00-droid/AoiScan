@@ -29,24 +29,24 @@ private enum CaptureOrientationMode:CaseIterable {
     var title:String {
         switch self {
         case .automatic:
-            return "自动"
+            return L10n.text("自动")
         case .portrait:
-            return "竖屏"
+            return L10n.text("竖屏")
         case .landscapeTopLeft:
-            return "横屏（手机顶部朝左）"
+            return L10n.text("横屏（手机顶部朝左）")
         case .landscapeTopRight:
-            return "横屏（手机顶部朝右）"
+            return L10n.text("横屏（手机顶部朝右）")
         }
     }
 
     var shortTitle:String {
         switch self {
         case .automatic:
-            return "自动"
+            return L10n.text("自动")
         case .portrait:
-            return "竖屏"
+            return L10n.text("竖屏")
         case .landscapeTopLeft, .landscapeTopRight:
-            return "横屏"
+            return L10n.text("横屏")
         }
     }
 
@@ -282,8 +282,8 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
     private let modeControl =
     UISegmentedControl(
         items:[
-            "单页",
-            "多页"
+            L10n.text("单页"),
+            L10n.text("多页")
         ]
     )
 
@@ -555,8 +555,8 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
                 }
                 else {
                     self.queueCameraAlert(
-                        title:"无法使用相机",
-                        message:"请在系统设置中允许 AoiScan 使用相机。",
+                        title:L10n.text("无法使用相机"),
+                        message:L10n.text("请在系统设置中允许 AoiScan 使用相机。"),
                         showsSettings:true
                     )
                 }
@@ -564,15 +564,15 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
         case .denied, .restricted:
             queueCameraAlert(
-                title:"无法使用相机",
-                message:"请在系统设置中允许 AoiScan 使用相机。",
+                title:L10n.text("无法使用相机"),
+                message:L10n.text("请在系统设置中允许 AoiScan 使用相机。"),
                 showsSettings:true
             )
 
         @unknown default:
             queueCameraAlert(
-                title:"相机不可用",
-                message:"当前无法取得相机权限。",
+                title:L10n.text("相机不可用"),
+                message:L10n.text("当前无法取得相机权限。"),
                 showsSettings:false
             )
         }
@@ -631,7 +631,7 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
             }
             catch {
                 self.queueCameraAlert(
-                    title:"相机启动失败",
+                    title:L10n.text("相机启动失败"),
                     message:error.localizedDescription,
                     showsSettings:false
                 )
@@ -761,7 +761,7 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
         alert.addAction(
             UIAlertAction(
-                title:"取消",
+                title:L10n.text("取消"),
                 style:.cancel
             )
         )
@@ -773,7 +773,7 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
             alert.addAction(
                 UIAlertAction(
-                    title:"前往设置",
+                    title:L10n.text("前往设置"),
                     style:.default
                 ) { _ in
                     UIApplication.shared.open(settingsURL)
@@ -1268,7 +1268,7 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
 
         doneButton.setTitle(
-            "完成 (0)",
+            L10n.format("完成 (%@)", "0"),
             for:.normal
         )
 
@@ -1423,7 +1423,9 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
         )
         guidanceLabel.layer.cornerRadius = 12
         guidanceLabel.layer.masksToBounds = true
-        guidanceLabel.text = "将纸张或书页放在画面中央"
+        guidanceLabel.text = L10n.text(
+            "将纸张或书页放在画面中央"
+        )
         guidanceLabel.isHidden =
             !RecognitionSettings.captureGuidanceEnabled
 
@@ -1701,27 +1703,27 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
         if brightness < 48 {
             message = flashOn
-                ? "光线较暗，闪光灯会辅助拍摄"
-                : "光线较暗，建议开启闪光灯"
+                ? L10n.text("光线较暗，闪光灯会辅助拍摄")
+                : L10n.text("光线较暗，建议开启闪光灯")
         }
         else if let corners {
             let area = quadrilateralArea(corners)
 
             if area < 0.18 {
-                message = "请靠近并对准单页纸张"
+                message = L10n.text("请靠近并对准单页纸张")
             }
             else if perspectiveIsStrong(corners) {
-                message = "请尽量让手机与纸面保持平行"
+                message = L10n.text("请尽量让手机与纸面保持平行")
             }
             else if isStable {
-                message = "已对准，可以拍摄"
+                message = L10n.text("已对准，可以拍摄")
             }
             else {
-                message = "请保持稳定"
+                message = L10n.text("请保持稳定")
             }
         }
         else {
-            message = "将纸张或书页放在画面中央"
+            message = L10n.text("将纸张或书页放在画面中央")
         }
 
         guard message != lastGuidanceMessage else {
@@ -1988,8 +1990,18 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
             message:captureReferenceCorners == nil
                 ? "拍摄前没有取得连续稳定的纸张定位"
                 : "拍摄前已取得连续稳定的纸张定位",
-            details:
-                "模式 \(isMultiPage ? "多页" : "单页")，闪光灯 \(flashOn ? "开启" : "关闭")，对焦曝光 \(focusExposureTimedOut ? "等待 250 毫秒后拍摄" : "已稳定")，方向 \(captureOrientationMode.title)，拍摄旋转 \(Int(currentCaptureRotationAngle.rounded()))°"
+            details:L10n.format(
+                "模式 %@，闪光灯 %@，对焦曝光 %@，方向 %@，拍摄旋转 %d°",
+                L10n.text(isMultiPage ? "多页" : "单页"),
+                L10n.text(flashOn ? "开启" : "关闭"),
+                L10n.text(
+                    focusExposureTimedOut
+                        ? "等待 250 毫秒后拍摄"
+                        : "已稳定"
+                ),
+                captureOrientationMode.title,
+                Int(currentCaptureRotationAngle.rounded())
+            )
         )
 
 
@@ -2304,7 +2316,10 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
 
         doneButton.setTitle(
-            "完成 (\(count))",
+            L10n.format(
+                "完成 (%@)",
+                String(count)
+            ),
             for:.normal
         )
 
@@ -2423,7 +2438,7 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
         }
 
         orientationButton.menu = UIMenu(
-            title:"拍摄方向",
+            title:L10n.text("拍摄方向"),
             children:actions
         )
 
@@ -2436,7 +2451,10 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
             for:.normal
         )
         orientationButton.accessibilityLabel =
-            "拍摄方向：\(captureOrientationMode.title)"
+            L10n.format(
+                "拍摄方向：%@",
+                captureOrientationMode.title
+            )
     }
 
 
@@ -2471,13 +2489,13 @@ private enum ScannerCameraError:LocalizedError {
     var errorDescription:String? {
         switch self {
         case .cameraUnavailable:
-            return "没有找到可用的后置相机。"
+            return L10n.text("没有找到可用的后置相机。")
         case .cannotAddInput:
-            return "无法连接后置相机。"
+            return L10n.text("无法连接后置相机。")
         case .cannotAddPhotoOutput:
-            return "无法创建拍照输出。"
+            return L10n.text("无法创建拍照输出。")
         case .cannotAddVideoOutput:
-            return "无法创建纸张识别预览。"
+            return L10n.text("无法创建纸张识别预览。")
         }
     }
 }

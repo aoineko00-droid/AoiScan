@@ -55,7 +55,7 @@ struct ScanDetailView: View {
                 VStack(spacing:20) {
                     
                     Text(
-                        document.title ?? "扫描文档"
+                        document.title ?? L10n.text("扫描文档")
                     )
                     .font(.title2)
                     .bold()
@@ -393,10 +393,13 @@ struct ScanDetailView: View {
                 } label: {
 
                     if filterForPage(currentPage) == filter {
-                        Label(filter.rawValue, systemImage:"checkmark")
-                    }
-                    else {
-                        Text(filter.rawValue)
+                            Label(
+                                filter.localizedTitle,
+                                systemImage:"checkmark"
+                            )
+                        }
+                        else {
+                            Text(filter.localizedTitle)
                     }
 
                 }
@@ -1304,7 +1307,7 @@ struct ScanDetailView: View {
         
         let pdfURL =
         folderURL.appendingPathComponent(
-            "\(document.title ?? "扫描文档").pdf"
+            "\(document.title ?? L10n.text("扫描文档")).pdf"
         )
         
         

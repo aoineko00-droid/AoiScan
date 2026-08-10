@@ -234,12 +234,19 @@ class ScanManager: ObservableObject {
         document.id = UUID()
         
         // 从现有文档中查找最大编号
-        let prefix = "扫描文件#"
+        let legacyPrefix = "扫描文件#"
+        let localizedPrefix = L10n.text("扫描文件#")
+        let supportedPrefixes = [
+            legacyPrefix,
+            "Scan #"
+        ]
         var maxIndex = 0
         
         for doc in documents {
             if let title = doc.title,
-               title.hasPrefix(prefix) {
+               let prefix = supportedPrefixes.first(
+                where:title.hasPrefix
+               ) {
                 let suffix = title.dropFirst(prefix.count)
                 if let num = Int(suffix), num > maxIndex {
                     maxIndex = num
@@ -247,7 +254,7 @@ class ScanManager: ObservableObject {
             }
         }
         
-        document.title = "\(prefix)\(maxIndex + 1)"
+        document.title = "\(localizedPrefix)\(maxIndex + 1)"
         document.folderPath = folderIdentifier
         document.createdAt = Date()
         save()
@@ -342,4 +349,3 @@ class ScanManager: ObservableObject {
     
     
 }
-

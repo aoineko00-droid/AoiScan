@@ -233,7 +233,7 @@ struct ContentView: View {
                                     
                                     Text(
                                         document.title
-                                        ?? "未命名文档"
+                                        ?? L10n.text("未命名文档")
                                     )
                                     .font(.headline)
                                     

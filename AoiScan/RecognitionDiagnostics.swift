@@ -165,22 +165,25 @@ final class RecognitionLogStore:ObservableObject {
 
     func exportedText()->String {
         guard !entries.isEmpty else {
-            return "AoiScan 暂无识别日志"
+            return L10n.text("AoiScan 暂无识别日志")
         }
 
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier:"zh_CN")
+        formatter.locale = AppLanguage.current.locale
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
 
         let header = [
-            "AoiScan 识别日志",
-            "导出时间：\(formatter.string(from:Date()))",
-            "说明：日志不包含扫描图片和识别文字内容。",
+            L10n.text("AoiScan 识别日志"),
+            L10n.format(
+                "导出时间：%@",
+                formatter.string(from:Date())
+            ),
+            L10n.text("说明：日志不包含扫描图片和识别文字内容。"),
             ""
         ]
 
         let lines = entries.map { entry in
-            var line = "[\(formatter.string(from:entry.date))] [\(entry.level)] [\(entry.category)] \(entry.message)"
+            var line = "[\(formatter.string(from:entry.date))] [\(L10n.text(entry.level))] [\(L10n.text(entry.category))] \(L10n.text(entry.message))"
 
             if let details = entry.details,
                !details.isEmpty {

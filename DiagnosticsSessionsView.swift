@@ -22,7 +22,13 @@ struct DiagnosticsSessionsView: View {
                 ForEach(sessions, id: \ .session.id) { s in
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Text(s.session.multiPage ? "多页会话" : "单页会话")
+                            Text(
+                                L10n.text(
+                                    s.session.multiPage
+                                    ? "多页会话"
+                                    : "单页会话"
+                                )
+                            )
                                 .font(.subheadline).bold()
                             Spacer()
                             Text(s.createdAt, style: .date)
@@ -32,14 +38,24 @@ struct DiagnosticsSessionsView: View {
                         .foregroundStyle(.secondary)
 
                         HStack(spacing: 10) {
-                            Text("ID: \(s.session.id)")
+                            Text(
+                                L10n.format(
+                                    "会话 ID: %@",
+                                    s.session.id
+                                )
+                            )
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
 
                             if let count = s.session.pageCount {
-                                Text("页数: \(count)")
+                                Text(
+                                    L10n.format(
+                                        "页数: %@",
+                                        String(count)
+                                    )
+                                )
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -82,7 +98,10 @@ struct DiagnosticsSessionsView: View {
                     sessions = items
                 case .failure(let error):
                     sessions = []
-                    message = "载入失败：\(error.localizedDescription)"
+                    message = L10n.format(
+                        "载入失败：%@",
+                        error.localizedDescription
+                    )
                 }
             }
         }
@@ -96,12 +115,17 @@ struct DiagnosticsSessionsView: View {
                 case .success(let data):
                     if let text = String(data: data, encoding: .utf8) {
                         UIPasteboard.general.string = text
-                        message = "已复制诊断信息。"
+                        message = L10n.text("已复制诊断信息。")
                     } else {
-                        message = "复制失败：编码为文本时出错。"
+                        message = L10n.text(
+                            "复制失败：编码为文本时出错。"
+                        )
                     }
                 case .failure(let error):
-                    message = "复制失败：\(error.localizedDescription)"
+                    message = L10n.format(
+                        "复制失败：%@",
+                        error.localizedDescription
+                    )
                 }
             }
         }
@@ -114,9 +138,12 @@ struct DiagnosticsSessionsView: View {
                 switch result {
                 case .success:
                     sessions = []
-                    message = "已清空诊断日志。"
+                    message = L10n.text("已清空诊断日志。")
                 case .failure(let error):
-                    message = "清空失败：\(error.localizedDescription)"
+                    message = L10n.format(
+                        "清空失败：%@",
+                        error.localizedDescription
+                    )
                 }
             }
         }

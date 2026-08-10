@@ -1,0 +1,2 @@
+"NSCameraUsageDescription" = "AoiScan 需要使用相机扫描文档。";
+"NSPhotoLibraryAddUsageDescription" = "允许 AoiScan 将导出的图片保存到照片图库。";

@@ -30,6 +30,10 @@ enum ScanPageFilter:String,CaseIterable,Hashable,Codable {
     case smart = "智能"
     case color = "原图"
     case blackWhite = "黑白"
+
+    var localizedTitle:String {
+        L10n.text(rawValue)
+    }
 }
 
 
@@ -584,8 +588,7 @@ enum DocumentRectangleSelector {
             CGPoint(x:0.5, y:0.5)
         )
 
-        return String(
-            format:
+        return L10n.format(
                 "置信度 %.2f，画面占比 %.1f%%，中心距离 %.2f",
             rectangle.confidence,
             area * 100,
@@ -1347,11 +1350,13 @@ class ScanProcessor {
                                 RecognitionLogStore.shared.add(
                                     category:"书本合并",
                                     message:"识别到左右书页，已合并为一个完整裁切范围",
-                                    details:
-                                        "来源 \(fallback.detectionSource)，矩形候选 \(fallback.rectangleCandidateCount) 个，文字区域 \(fallback.textObservationCount) 个；"
-                                        + self.cornerDiagnosticDetails(
-                                            selectedCorners
-                                        )
+                                    details:L10n.format(
+                                        "来源 %@，矩形候选 %d 个，文字区域 %d 个；%@",
+                                        L10n.text(fallback.detectionSource),
+                                        fallback.rectangleCandidateCount,
+                                        fallback.textObservationCount,
+                                        self.cornerDiagnosticDetails(selectedCorners)
+                                    )
                                 )
                             }
                             else {
@@ -1359,8 +1364,11 @@ class ScanProcessor {
                                     level:"警告",
                                     category:"书本合并",
                                     message:"找到左右书页，但合并后的外框无法完成校准",
-                                    details:
-                                        "来源 \(fallback.detectionSource)，矩形候选 \(fallback.rectangleCandidateCount) 个"
+                                    details:L10n.format(
+                                        "来源 %@，矩形候选 %d 个",
+                                        L10n.text(fallback.detectionSource),
+                                        fallback.rectangleCandidateCount
+                                    )
                                 )
                             }
                         }
@@ -1390,12 +1398,14 @@ class ScanProcessor {
                                         ? "书页兜底"
                                         : "增强识别",
                                     message:"识别并校准单页书页或小文档成功",
-                                    details:
-                                        "来源 \(fallback.detectionSource)，矩形候选 \(fallback.rectangleCandidateCount) 个，文字区域 \(fallback.textObservationCount) 个；"
-                                        + DocumentRectangleSelector
-                                            .diagnosticDetails(
-                                                for:rectangle
-                                            )
+                                    details:L10n.format(
+                                        "来源 %@，矩形候选 %d 个，文字区域 %d 个；%@",
+                                        L10n.text(fallback.detectionSource),
+                                        fallback.rectangleCandidateCount,
+                                        fallback.textObservationCount,
+                                        DocumentRectangleSelector
+                                            .diagnosticDetails(for:rectangle)
+                                    )
                                 )
                             }
                             else {
@@ -1403,8 +1413,12 @@ class ScanProcessor {
                                     level:"警告",
                                     category:"书页兜底",
                                     message:"找到候选书页，但透视校准失败",
-                                    details:
-                                        "来源 \(fallback.detectionSource)，矩形候选 \(fallback.rectangleCandidateCount) 个，文字区域 \(fallback.textObservationCount) 个"
+                                    details:L10n.format(
+                                        "来源 %@，矩形候选 %d 个，文字区域 %d 个",
+                                        L10n.text(fallback.detectionSource),
+                                        fallback.rectangleCandidateCount,
+                                        fallback.textObservationCount
+                                    )
                                 )
                             }
                         }
@@ -1422,11 +1436,13 @@ class ScanProcessor {
                                 level:"警告",
                                 category:"识别失败",
                                 message:failureMessage,
-                                details:
-                                    "已尝试原图及增强通道；矩形候选 \(fallback.rectangleCandidateCount) 个，文字区域 \(fallback.textObservationCount) 个"
-                                    + (fallback.rectangleCandidateCount > 0
-                                        ? "；候选未通过中心位置、几何形状或文字证据检查"
-                                        : "；Vision 未检测到矩形候选")
+                                details:L10n.format(
+                                    fallback.rectangleCandidateCount > 0
+                                        ? "已尝试原图及增强通道；矩形候选 %d 个，文字区域 %d 个；候选未通过中心位置、几何形状或文字证据检查"
+                                        : "已尝试原图及增强通道；矩形候选 %d 个，文字区域 %d 个；Vision 未检测到矩形候选",
+                                    fallback.rectangleCandidateCount,
+                                    fallback.textObservationCount
+                                )
                             )
                         }
                     }
@@ -2018,8 +2034,8 @@ class ScanProcessor {
                 - next.x * points[index].y
         }
 
-        return String(
-            format:"画面占比 %.1f%%",
+        return L10n.format(
+            "画面占比 %.1f%%",
             abs(area) * 50
         )
     }
@@ -2283,9 +2299,9 @@ private enum TextRecognitionError:LocalizedError {
     var errorDescription:String? {
         switch self {
         case .invalidImage:
-            return "无法读取当前图片"
+            return L10n.text("无法读取当前图片")
         case .noTextFound:
-            return "当前页面没有识别到文字"
+            return L10n.text("当前页面没有识别到文字")
         }
     }
 }
@@ -2564,7 +2580,10 @@ struct TextRecognitionView:View {
             ) {
                 Button("好", role:.cancel) {}
             } message: {
-                Text(errorMessage ?? "无法完成当前操作")
+                Text(
+                    errorMessage
+                    ?? L10n.text("无法完成当前操作")
+                )
             }
         }
         .sheet(item:$textShareItem) { item in
@@ -2579,10 +2598,14 @@ struct TextRecognitionView:View {
 
     private var pageDescription:String {
         guard !images.isEmpty else {
-            return "没有页面"
+            return L10n.text("没有页面")
         }
 
-        return "第 \(pageIndex + 1) 页 / 共 \(images.count) 页"
+        return L10n.format(
+            "第 %@ 页 / 共 %@ 页",
+            String(pageIndex + 1),
+            String(images.count)
+        )
     }
 
     private func prepareTextFileForSharing() {
@@ -2603,8 +2626,11 @@ struct TextRecognitionView:View {
             )
 
             let fileName = images.count > 1
-                ? "识别文字-第\(pageIndex + 1)页.txt"
-                : "识别文字.txt"
+                ? L10n.format(
+                    "识别文字-第%@页.txt",
+                    String(pageIndex + 1)
+                )
+                : L10n.text("识别文字.txt")
             let fileURL = directory.appendingPathComponent(fileName)
             try text.write(
                 to:fileURL,
@@ -2613,7 +2639,10 @@ struct TextRecognitionView:View {
             )
             textShareItem = TextShareItem(url:fileURL)
         } catch {
-            errorMessage = "无法创建文字分享文件：\(error.localizedDescription)"
+            errorMessage = L10n.format(
+                "无法创建文字分享文件：%@",
+                error.localizedDescription
+            )
         }
     }
 
@@ -2702,7 +2731,7 @@ final class DocumentZoomScrollView:UIScrollView {
         documentImageView.contentMode = .scaleAspectFit
         documentImageView.clipsToBounds = true
         documentImageView.isAccessibilityElement = true
-        documentImageView.accessibilityLabel = "扫描图片"
+        documentImageView.accessibilityLabel = L10n.text("扫描图片")
         addSubview(documentImageView)
     }
 

@@ -96,7 +96,10 @@ struct DiagnosticsView: View {
             try exportText.write(to: tmp, atomically: true, encoding: .utf8)
             presentShareSheet(url: tmp)
         } catch {
-            errorMessage = "无法写出分享文件：\(error.localizedDescription)"
+            errorMessage = L10n.format(
+                "无法写出分享文件：%@",
+                error.localizedDescription
+            )
         }
     }
 

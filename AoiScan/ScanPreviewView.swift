@@ -51,7 +51,13 @@ struct ScanPreviewView:View {
                                     .padding(.horizontal)
                                     .id(pages[index].id)
 
-                                Text("第 \(index + 1) 页 / 共 \(pages.count) 页")
+                                Text(
+                                    L10n.format(
+                                        "第 %@ 页 / 共 %@ 页",
+                                        String(index + 1),
+                                        String(pages.count)
+                                    )
+                                )
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -105,10 +111,13 @@ struct ScanPreviewView:View {
                     } label: {
                         if pages.indices.contains(currentPage),
                            pages[currentPage].filter == filter {
-                            Label(filter.rawValue, systemImage:"checkmark")
+                            Label(
+                                filter.localizedTitle,
+                                systemImage:"checkmark"
+                            )
                         }
                         else {
-                            Text(filter.rawValue)
+                            Text(filter.localizedTitle)
                         }
                     }
                 }
@@ -413,7 +422,7 @@ struct ScanPreviewView:View {
         let context = PersistenceController.shared.container.viewContext
         let document = ScanEntity(context:context)
         document.id = UUID()
-        document.title = "扫描文档"
+        document.title = L10n.text("扫描文档")
         document.folderPath = folderIdentifier
         document.createdAt = Date()
 
