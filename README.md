@@ -1,20 +1,25 @@
 # AoiScan
 
 <p align="center">
+  <img src="icon.png" width="120" alt="AoiScan Icon">
+</p>
+
+<p align="center">
   <b>A privacy-focused offline document scanner for iOS.</b>
 </p>
 
-AoiScan is an iOS document scanning project focused on providing a simple, secure, and high-quality scanning experience.
+AoiScan is an open-source iOS document scanning application designed around **privacy, simplicity, and local processing**.
 
-Unlike cloud-based scanning solutions, AoiScan is designed with an **offline-first approach**, processing documents locally on the device whenever possible.
+Unlike cloud-dependent scanning solutions, AoiScan aims to process documents directly on the device whenever possible, keeping user documents private and secure.
 
-The goal is to create a lightweight but powerful document scanner with professional-quality image enhancement while protecting user privacy.
+The goal of AoiScan is to build a lightweight but powerful document scanner using Apple's native technologies and modern computer vision techniques.
 
 ---
 
 ## ✨ Features
 
 ### Document Scanning
+
 - 📷 Capture documents using the iPhone camera
 - 📄 Automatic document detection
 - 📐 Perspective correction
@@ -22,32 +27,27 @@ The goal is to create a lightweight but powerful document scanner with professio
 - 📑 Export scanned documents as PDF
 
 ### Privacy & Security
-- 🔒 Offline-first design
+
+- 🔒 Offline-first architecture
 - 🛡️ No automatic cloud upload
 - 📱 Local document processing
-- 🔐 User data stays on the device
+- 🔐 User documents stay on the device
 
 ### Document Management
+
 - PDF document organization
 - Local file management
-- Diagnostic logs for easier troubleshooting
+- Diagnostic logs for troubleshooting
 
 ---
 
-## 🚧 Development Status
+## 📱 Screenshots
 
-AoiScan is currently under active development.
-
-The project is focused on building a professional document scanning experience with:
-
-- High-quality image processing
-- Fast local performance
-- Simple and intuitive user interface
-- Privacy-focused architecture
+Coming soon.
 
 ---
 
-## 🛠️ Technologies
+## 🛠 Technologies
 
 AoiScan is built with Apple's native frameworks and modern iOS technologies.
 
@@ -58,24 +58,39 @@ AoiScan is built with Apple's native frameworks and modern iOS technologies.
 - Vision Framework
 - Core Image
 - PDFKit
+- Core Data
 
 ### Planned Technologies
 
 - OpenCV for advanced document image processing
 - Core ML for local AI enhancement
 - OCR text recognition
-- Advanced document understanding
+- Intelligent document understanding
 
 ---
 
-## 🗺️ Roadmap
+## 🚧 Development Status
+
+AoiScan is currently under active development.
+
+The project focuses on:
+
+- Improving document image quality
+- Optimizing local processing performance
+- Building a simple and intuitive scanning workflow
+- Exploring privacy-focused AI features
+
+---
+
+## 🗺 Roadmap
 
 ### Version 1.0
 
 - [x] Basic document capture
 - [x] PDF generation
-- [ ] Document edge detection
-- [ ] Perspective correction improvements
+- [x] Local document storage
+- [ ] Improved edge detection
+- [ ] Better perspective correction
 - [ ] Advanced image enhancement
 
 ### Future Development
@@ -93,13 +108,26 @@ AoiScan is built with Apple's native frameworks and modern iOS technologies.
 
 ## 🧠 Vision
 
-Many document scanner applications rely on cloud processing for advanced features.
+Many document scanner applications rely on cloud services for advanced processing.
 
 AoiScan explores a different approach:
 
-> Powerful scanning capabilities while keeping documents private and processed locally.
+> Powerful scanning features while keeping documents private and processed locally.
 
-The project aims to combine modern iOS technologies with efficient computer vision algorithms to deliver a secure and professional scanning experience.
+The project aims to combine Apple's ecosystem, computer vision algorithms, and local AI technologies to create a secure document scanning experience.
+
+---
+
+## 🤝 Contributing
+
+Contributions, bug reports, and suggestions are welcome.
+
+When reporting issues, please include:
+
+- iOS version
+- Device model
+- Steps to reproduce the problem
+- Screenshots or diagnostic logs if available
 
 ---
 
@@ -114,4 +142,4 @@ Requirements:
 Clone the repository:
 
 ```bash
-git clone https://github.com/yourusername/AoiScan.git
+git clone https://github.com/aoineko00-droid/AoiScan.git
