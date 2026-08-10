@@ -1,0 +1,124 @@
+import SwiftUI
+
+struct DiagnosticsSessionsView: View {
+    @State private var sessions: [SessionLog] = []
+    @State private var isLoading = false
+    @State private var message: String?
+
+    var body: some View {
+        List {
+            if isLoading {
+                HStack {
+                    ProgressView()
+                    Text("正在载入诊断会话…")
+                }
+            } else if sessions.isEmpty {
+                ContentUnavailableView(
+                    "暂无诊断会话",
+                    systemImage: "shippingbox",
+                    description: Text("完成一次扫描流程后，这里会显示会话级诊断日志。")
+                )
+            } else {
+                ForEach(sessions, id: \ .session.id) { s in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(s.session.multiPage ? "多页会话" : "单页会话")
+                                .font(.subheadline).bold()
+                            Spacer()
+                            Text(s.createdAt, style: .date)
+                            Text(s.createdAt, style: .time)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        HStack(spacing: 10) {
+                            Text("ID: \(s.session.id)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+
+                            if let count = s.session.pageCount {
+                                Text("页数: \(count)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .navigationTitle("诊断日志（Session）")
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button("刷新") { load() }
+                Button("复制") { copyDiagnostics() }
+                Button("清空", role: .destructive) { clear() }
+            }
+        }
+        .onAppear { load() }
+        .overlay(alignment: .bottom) {
+            if let message {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(8)
+                    .background(.thinMaterial, in: Capsule())
+                    .padding(.bottom, 10)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    private func load() {
+        isLoading = true
+        message = nil
+        DiagnosticsStore.shared.loadRecentSessions { result in
+            DispatchQueue.main.async {
+                isLoading = false
+                switch result {
+                case .success(let items):
+                    sessions = items
+                case .failure(let error):
+                    sessions = []
+                    message = "载入失败：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func copyDiagnostics() {
+        message = nil
+        DiagnosticsStore.shared.exportRecentSessions { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let data):
+                    if let text = String(data: data, encoding: .utf8) {
+                        UIPasteboard.general.string = text
+                        message = "已复制诊断信息。"
+                    } else {
+                        message = "复制失败：编码为文本时出错。"
+                    }
+                case .failure(let error):
+                    message = "复制失败：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func clear() {
+        message = nil
+        DiagnosticsStore.shared.clearAll { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    sessions = []
+                    message = "已清空诊断日志。"
+                case .failure(let error):
+                    message = "清空失败：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
+}

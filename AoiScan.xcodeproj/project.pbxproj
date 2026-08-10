@@ -10,6 +10,11 @@
 		B088F3043026BC0500042F1A /* AoiScanModel.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = B088F3023026BC0500042F1A /* AoiScanModel.xcdatamodeld */; };
 		B088F30F3026C29500042F1A /* ScanEntity+CoreDataProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = B088F30E3026C29500042F1A /* ScanEntity+CoreDataProperties.swift */; };
 		B088F3103026C29500042F1A /* ScanEntity+CoreDataClass.swift in Sources */ = {isa = PBXBuildFile; fileRef = B088F30D3026C29500042F1A /* ScanEntity+CoreDataClass.swift */; };
+		B0EE07953029EB5D00D06083 /* DiagnosticsLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0EE07943029EB5D00D06083 /* DiagnosticsLog.swift */; };
+		B0EE07973029EB6D00D06083 /* DiagnosticsCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0EE07963029EB6D00D06083 /* DiagnosticsCollector.swift */; };
+		B0EE07993029EB6E00D06083 /* DiagnosticsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0EE07983029EB6E00D06083 /* DiagnosticsStore.swift */; };
+		B0EE079B3029EF5E00D06083 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0EE079A3029EF5E00D06083 /* DiagnosticsView.swift */; };
+		B0EE079D3029F28400D06083 /* DiagnosticsSessionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0EE079C3029F28400D06083 /* DiagnosticsSessionsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -17,6 +22,11 @@
 		B088F3033026BC0500042F1A /* AoiScanModel.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = AoiScanModel.xcdatamodel; sourceTree = "<group>"; };
 		B088F30D3026C29500042F1A /* ScanEntity+CoreDataClass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScanEntity+CoreDataClass.swift"; sourceTree = "<group>"; };
 		B088F30E3026C29500042F1A /* ScanEntity+CoreDataProperties.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScanEntity+CoreDataProperties.swift"; sourceTree = "<group>"; };
+		B0EE07943029EB5D00D06083 /* DiagnosticsLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsLog.swift; sourceTree = "<group>"; };
+		B0EE07963029EB6D00D06083 /* DiagnosticsCollector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsCollector.swift; sourceTree = "<group>"; };
+		B0EE07983029EB6E00D06083 /* DiagnosticsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsStore.swift; sourceTree = "<group>"; };
+		B0EE079A3029EF5E00D06083 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
+		B0EE079C3029F28400D06083 /* DiagnosticsSessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsSessionsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -59,6 +69,11 @@
 				B088F3023026BC0500042F1A /* AoiScanModel.xcdatamodeld */,
 				B079700330261404002DD544 /* AoiScan */,
 				B079700230261404002DD544 /* Products */,
+				B0EE07943029EB5D00D06083 /* DiagnosticsLog.swift */,
+				B0EE07963029EB6D00D06083 /* DiagnosticsCollector.swift */,
+				B0EE07983029EB6E00D06083 /* DiagnosticsStore.swift */,
+				B0EE079A3029EF5E00D06083 /* DiagnosticsView.swift */,
+				B0EE079C3029F28400D06083 /* DiagnosticsSessionsView.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -146,7 +161,12 @@
 			files = (
 				B088F3043026BC0500042F1A /* AoiScanModel.xcdatamodeld in Sources */,
 				B088F30F3026C29500042F1A /* ScanEntity+CoreDataProperties.swift in Sources */,
+				B0EE079D3029F28400D06083 /* DiagnosticsSessionsView.swift in Sources */,
 				B088F3103026C29500042F1A /* ScanEntity+CoreDataClass.swift in Sources */,
+				B0EE07953029EB5D00D06083 /* DiagnosticsLog.swift in Sources */,
+				B0EE07993029EB6E00D06083 /* DiagnosticsStore.swift in Sources */,
+				B0EE07973029EB6D00D06083 /* DiagnosticsCollector.swift in Sources */,
+				B0EE079B3029EF5E00D06083 /* DiagnosticsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

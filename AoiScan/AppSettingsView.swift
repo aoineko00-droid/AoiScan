@@ -123,6 +123,19 @@ struct AppSettingsView:View {
 
             Section("诊断") {
                 NavigationLink {
+                    DiagnosticsSessionsView()
+                } label: {
+                    HStack {
+                        Label(
+                            "诊断日志（Session）",
+                            systemImage:"shippingbox"
+                        )
+
+                        Spacer()
+                    }
+                }
+
+                NavigationLink {
                     RecognitionLogView()
                 } label: {
                     HStack {
@@ -140,6 +153,31 @@ struct AppSettingsView:View {
 
                 Text(
                     "日志只记录识别方式、候选数量、纸张面积和失败原因，不保存扫描图片或识别出的文字内容。最多保留 250 条。"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+
+            Section("隐私声明") {
+                Label(
+                    "所有功能均在本机完成",
+                    systemImage:"lock.shield"
+                )
+
+                Text(
+                    "AoiScan 不连接服务器。扫描图片、文字识别、文档搜索和文件保存均在设备本地完成，不会上传扫描内容、识别文字或文件名。"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+                Text(
+                    "部分中国区 iOS 设备可能在首次使用系统键盘时显示“无线数据”授权。选择“不允许”不会影响扫描、文字识别、搜索、重命名或 PDF 生成。"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+                Text(
+                    "诊断日志仅保存识别流程和错误信息，不包含扫描图片或识别文字。"
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)

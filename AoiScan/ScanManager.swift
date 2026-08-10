@@ -299,13 +299,20 @@ class ScanManager: ObservableObject {
         _ document: ScanEntity,
         newName: String
     ) {
-        
-        
-        document.title = newName
-        
-        
+        // Normalize new name
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            // Do not update if empty name; simply return without side effects
+            return
+        }
+
+        // Only update Core Data title if changed
+        if document.title != trimmed {
+            document.title = trimmed
+        }
+
+        // Persist changes locally; avoid any external UI/URL/actions here
         save()
-        
     }
     
     
@@ -335,3 +342,4 @@ class ScanManager: ObservableObject {
     
     
 }
+
