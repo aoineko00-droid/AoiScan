@@ -6,8 +6,17 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		B088F3043026BC0500042F1A /* AoiScanModel.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = B088F3023026BC0500042F1A /* AoiScanModel.xcdatamodeld */; };
+		B088F30F3026C29500042F1A /* ScanEntity+CoreDataProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = B088F30E3026C29500042F1A /* ScanEntity+CoreDataProperties.swift */; };
+		B088F3103026C29500042F1A /* ScanEntity+CoreDataClass.swift in Sources */ = {isa = PBXBuildFile; fileRef = B088F30D3026C29500042F1A /* ScanEntity+CoreDataClass.swift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		B079700130261404002DD544 /* AoiScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AoiScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B088F3033026BC0500042F1A /* AoiScanModel.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = AoiScanModel.xcdatamodel; sourceTree = "<group>"; };
+		B088F30D3026C29500042F1A /* ScanEntity+CoreDataClass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScanEntity+CoreDataClass.swift"; sourceTree = "<group>"; };
+		B088F30E3026C29500042F1A /* ScanEntity+CoreDataProperties.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScanEntity+CoreDataProperties.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -45,6 +54,9 @@
 		B0796FF830261404002DD544 = {
 			isa = PBXGroup;
 			children = (
+				B088F30D3026C29500042F1A /* ScanEntity+CoreDataClass.swift */,
+				B088F30E3026C29500042F1A /* ScanEntity+CoreDataProperties.swift */,
+				B088F3023026BC0500042F1A /* AoiScanModel.xcdatamodeld */,
 				B079700330261404002DD544 /* AoiScan */,
 				B079700230261404002DD544 /* Products */,
 			);
@@ -132,6 +144,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B088F3043026BC0500042F1A /* AoiScanModel.xcdatamodeld in Sources */,
+				B088F30F3026C29500042F1A /* ScanEntity+CoreDataProperties.swift in Sources */,
+				B088F3103026C29500042F1A /* ScanEntity+CoreDataClass.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -190,7 +205,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -247,7 +262,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -269,7 +284,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = AoiScan/Info.plist;
-				INFOPLIST_KEY_NSCameraUsageDescription = "用于扫描文档";
+				INFOPLIST_KEY_NSCameraUsageDescription = "AoiScan需要使用相机扫描文档";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "保存照片";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -277,6 +292,7 @@
 				INFOPLIST_KEY_UILaunchStoryboardName = "";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -306,7 +322,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = AoiScan/Info.plist;
-				INFOPLIST_KEY_NSCameraUsageDescription = "用于扫描文档";
+				INFOPLIST_KEY_NSCameraUsageDescription = "AoiScan需要使用相机扫描文档";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "保存照片";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -314,6 +330,7 @@
 				INFOPLIST_KEY_UILaunchStoryboardName = "";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -353,6 +370,19 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCVersionGroup section */
+		B088F3023026BC0500042F1A /* AoiScanModel.xcdatamodeld */ = {
+			isa = XCVersionGroup;
+			children = (
+				B088F3033026BC0500042F1A /* AoiScanModel.xcdatamodel */,
+			);
+			currentVersion = B088F3033026BC0500042F1A /* AoiScanModel.xcdatamodel */;
+			path = AoiScanModel.xcdatamodeld;
+			sourceTree = "<group>";
+			versionGroupType = wrapper.xcdatamodel;
+		};
+/* End XCVersionGroup section */
 	};
 	rootObject = B0796FF930261404002DD544 /* Project object */;
 }
