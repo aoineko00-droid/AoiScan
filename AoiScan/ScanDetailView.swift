@@ -34,12 +34,19 @@ struct ScanDetailView: View {
     @State private var newName = ""
     
     @State private var shareItem: ShareItem?
+    @State private var isExportingWord = false
+    @State private var showWordExportError = false
+    @State private var wordExportError = ""
     
     @State private var showFilterMenu = false
     @State private var showCropSheet = false
     @State private var showTextRecognition = false
     
     @State private var currentPage = 0
+    @State private var detailEnhancementTokens:[Int:UUID] = [:]
+    @State private var detailEnhancementBannerToken:UUID?
+    @State private var detailEnhancementBannerShownAt:Date?
+    @State private var showDetailEnhancementBanner = false
     
     
     @Environment(\.dismiss)
@@ -106,6 +113,17 @@ struct ScanDetailView: View {
                         }
                         .frame(height:420)
                         .tabViewStyle(.page)
+                        .overlay(alignment:.bottom) {
+                            if showDetailEnhancementBanner {
+                                detailEnhancementBanner
+                                    .padding(.bottom,28)
+                                    .transition(
+                                        .opacity.combined(
+                                            with:.move(edge:.bottom)
+                                        )
+                                    )
+                            }
+                        }
                         
                     }
                     
@@ -196,6 +214,7 @@ struct ScanDetailView: View {
                 
             }
             .padding(.bottom,30)
+            .disabled(isDetailSmartEnhancing)
             
         }
         .navigationTitle("扫描详情")
@@ -242,25 +261,52 @@ struct ScanDetailView: View {
                 
                 
                 
-                Button {
-                    
-                    guard let url = generatePDF(
-                        for: document
-                    ) else {
-                        print("PDF生成失败")
-                        return
+                Menu {
+
+                    Button {
+
+                        guard let url = generatePDF(
+                            for:document
+                        ) else {
+                            print("PDF生成失败")
+                            return
+                        }
+
+                        shareItem = ShareItem(url:url)
+
+                    } label: {
+
+                        Label(
+                            "分享PDF",
+                            systemImage:"doc.richtext"
+                        )
+
                     }
 
-                    shareItem = ShareItem(url: url)
-                    
+
+                    Button {
+
+                        exportWordDocument()
+
+                    } label: {
+
+                        Label(
+                            "导出 Word",
+                            systemImage:"doc.badge.arrow.up"
+                        )
+
+                    }
+                    .disabled(isExportingWord)
+
                 } label:{
-                    
+
                     Label(
-                        "分享",
-                        systemImage:
-                            "square.and.arrow.up"
+                        isExportingWord
+                            ? L10n.text("正在导出 Word…")
+                            : L10n.text("分享"),
+                        systemImage:"square.and.arrow.up"
                     )
-                    
+
                 }
                 
                 
@@ -283,11 +329,15 @@ struct ScanDetailView: View {
                     initialPage:currentPage,
                     initialTexts:loadRecognizedTexts(
                         pageCount:recognitionImages.count
+                    ),
+                    initialResults:loadOCRPageResults(
+                        pageCount:recognitionImages.count
                     )
-                ) { pageIndex, text in
+                ) { pageIndex, text, result in
 
                     saveRecognizedText(
                         text,
+                        result:result,
                         at:pageIndex
                     )
 
@@ -305,6 +355,15 @@ struct ScanDetailView: View {
             
             loadImages()
             
+        }
+
+        .onDisappear {
+
+            detailEnhancementTokens.removeAll()
+            detailEnhancementBannerToken = nil
+            detailEnhancementBannerShownAt = nil
+            showDetailEnhancementBanner = false
+
         }
         
         
@@ -372,6 +431,20 @@ struct ScanDetailView: View {
             }
             
             
+        }
+
+
+        .alert(
+            "Word 导出失败",
+            isPresented:$showWordExportError
+        ) {
+
+            Button("好", role:.cancel) {}
+
+        } message: {
+
+            Text(wordExportError)
+
         }
         
         
@@ -879,6 +952,29 @@ struct ScanDetailView: View {
 
 
 
+    private func structuredOCRURL(
+        at index:Int
+    )->URL? {
+
+
+        guard let folderURL = ScanManager.shared.folderURL(
+            for:document
+        ) else {
+            return nil
+        }
+
+
+        return OCRStorage.fileURL(
+            in:folderURL,
+            pageNumber:index + 1
+        )
+
+
+    }
+
+
+
+
     private func loadRecognizedText(
         at index:Int
     )->String? {
@@ -937,8 +1033,40 @@ struct ScanDetailView: View {
 
 
 
+    private func loadOCRPageResults(
+        pageCount:Int
+    )->[Int:OCRPageResult] {
+
+
+        var results:[Int:OCRPageResult] = [:]
+
+
+        for index in 0..<pageCount {
+
+
+            guard let url = structuredOCRURL(at:index),
+                  let result = OCRStorage.load(from:url) else {
+                continue
+            }
+
+
+            results[index] = result.withPageNumber(index + 1)
+
+
+        }
+
+
+        return results
+
+
+    }
+
+
+
+
     private func saveRecognizedText(
         _ text:String,
+        result:OCRPageResult?,
         at index:Int
     ){
 
@@ -955,6 +1083,19 @@ struct ScanDetailView: View {
                 atomically:true,
                 encoding:.utf8
             )
+
+
+            if let result,
+               let structuredURL = structuredOCRURL(at:index) {
+
+
+                try OCRStorage.write(
+                    result.withPageNumber(index + 1),
+                    to:structuredURL
+                )
+
+
+            }
 
             print("识别文字保存成功:", url.path)
 
@@ -975,6 +1116,177 @@ struct ScanDetailView: View {
 
 
 
+    private var isDetailSmartEnhancing:Bool {
+        !detailEnhancementTokens.isEmpty
+    }
+
+
+
+
+    private var detailEnhancementBanner:some View {
+
+
+        HStack(spacing:10) {
+
+            ProgressView()
+                .tint(.white)
+
+            VStack(alignment:.leading, spacing:2) {
+
+                Text("智能优化中…")
+                    .font(.subheadline.bold())
+
+                Text("正在本机分析文字清晰度")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.82))
+
+            }
+
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal,16)
+        .padding(.vertical,10)
+        .background(
+            .black.opacity(0.72),
+            in:Capsule()
+        )
+        .shadow(color:.black.opacity(0.2), radius:8, y:3)
+
+
+    }
+
+
+
+
+    private func runSmartEnhancement(
+        image:UIImage,
+        at index:Int
+    ) {
+
+
+        guard displayImages.indices.contains(index) else { return }
+
+        let token = UUID()
+        detailEnhancementTokens[index] = token
+        beginDetailEnhancementBannerDelayIfNeeded()
+
+        SmartEnhancementPipeline.process(
+            rgbImage:image,
+            pageNumber:index + 1
+        ) { output in
+
+            guard detailEnhancementTokens[index] == token,
+                  filterForPage(index) == .smart,
+                  displayImages.indices.contains(index) else {
+                return
+            }
+
+            if displayImageURLs.indices.contains(index) {
+
+                let saved = writeImage(
+                    output.image,
+                    to:displayImageURLs[index]
+                )
+
+                displayImages[index] = saved
+                    ? thumbnailImage(
+                        at:displayImageURLs[index],
+                        maxPixelSize:1600
+                      ) ?? output.image
+                    : output.image
+
+            }
+            else {
+
+                displayImages[index] = output.image
+
+            }
+
+            detailEnhancementTokens[index] = nil
+            finishDetailEnhancementBannerIfNeeded()
+
+        }
+
+
+    }
+
+
+
+
+    private func invalidateSmartEnhancement(at index:Int) {
+
+
+        detailEnhancementTokens[index] = nil
+        finishDetailEnhancementBannerIfNeeded()
+
+
+    }
+
+
+
+
+    private func beginDetailEnhancementBannerDelayIfNeeded() {
+
+
+        guard detailEnhancementBannerToken == nil else { return }
+
+        let token = UUID()
+        detailEnhancementBannerToken = token
+
+        DispatchQueue.main.asyncAfter(deadline:.now() + 0.4) {
+
+            guard detailEnhancementBannerToken == token,
+                  isDetailSmartEnhancing else {
+                return
+            }
+
+            detailEnhancementBannerShownAt = Date()
+            withAnimation(.easeInOut(duration:0.2)) {
+                showDetailEnhancementBanner = true
+            }
+
+        }
+
+
+    }
+
+
+
+
+    private func finishDetailEnhancementBannerIfNeeded() {
+
+
+        guard !isDetailSmartEnhancing else { return }
+
+        let token = detailEnhancementBannerToken
+        let elapsed = detailEnhancementBannerShownAt.map {
+            Date().timeIntervalSince($0)
+        } ?? 0.6
+        let delay = showDetailEnhancementBanner
+            ? max(0, 0.6 - elapsed)
+            : 0
+
+        DispatchQueue.main.asyncAfter(deadline:.now() + delay) {
+
+            guard detailEnhancementBannerToken == token,
+                  !isDetailSmartEnhancing else {
+                return
+            }
+
+            withAnimation(.easeInOut(duration:0.2)) {
+                showDetailEnhancementBanner = false
+            }
+            detailEnhancementBannerShownAt = nil
+            detailEnhancementBannerToken = nil
+
+        }
+
+
+    }
+
+
+
+
     private func applyFilter(
         _ filter:ScanPageFilter,
         at index:Int
@@ -985,6 +1297,8 @@ struct ScanDetailView: View {
               displayImages.indices.contains(index) else {
             return
         }
+
+        invalidateSmartEnhancement(at:index)
 
 
         let sourceImage:UIImage
@@ -1060,6 +1374,13 @@ struct ScanDetailView: View {
         pageFilters[index] = filter
         saveCorners()
 
+        if filter == .smart {
+            runSmartEnhancement(
+                image:sourceImage,
+                at:index
+            )
+        }
+
 
     }
 
@@ -1070,6 +1391,9 @@ struct ScanDetailView: View {
         _ result:CropResult,
         at index:Int
     ){
+
+
+        invalidateSmartEnhancement(at:index)
 
 
         if originalImages.indices.contains(index) {
@@ -1174,10 +1498,21 @@ struct ScanDetailView: View {
 
         saveCorners()
 
+        if let structuredURL = structuredOCRURL(at:index) {
+            OCRStorage.removeIfPresent(at:structuredURL)
+        }
+
         OCRIndexManager.shared.reindexDocument(document)
 
 
         showCropSheet = false
+
+        if filterForPage(index) == .smart {
+            runSmartEnhancement(
+                image:result.image,
+                at:index
+            )
+        }
 
 
     }
@@ -1390,6 +1725,52 @@ struct ScanDetailView: View {
         
         return nil
         
+    }
+
+
+    private func exportWordDocument() {
+
+        guard !isExportingWord else { return }
+
+        guard let folderURL = ScanManager.shared.folderURL(
+            for:document
+        ) else {
+            presentWordExportError(
+                L10n.text("无法读取当前扫描文件夹。")
+            )
+            return
+        }
+
+        isExportingWord = true
+        defer { isExportingWord = false }
+
+        do {
+            let scanDocument = try DocumentAssembler().rebuild(
+                in:folderURL,
+                title:document.title
+                    ?? L10n.text("扫描文档"),
+                createdAt:document.createdAt ?? Date(),
+                id:document.id ?? UUID()
+            )
+            let url = try WordExporter().export(
+                document:scanDocument,
+                to:folderURL
+            )
+            shareItem = ShareItem(url:url)
+        }
+        catch {
+            presentWordExportError(
+                error.localizedDescription
+            )
+        }
+    }
+
+
+    private func presentWordExportError(
+        _ message:String
+    ) {
+        wordExportError = message
+        showWordExportError = true
     }
 
 

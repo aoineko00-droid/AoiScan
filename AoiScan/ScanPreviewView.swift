@@ -18,7 +18,16 @@ struct ScanPreviewView:View {
     @State private var showFilterMenu = false
     @State private var showTextRecognition = false
     @State private var recognizedTexts:[Int:String] = [:]
+    @State private var recognizedResults:[Int:OCRPageResult] = [:]
     @State private var promptedManualCropPages:Set<UUID> = []
+    @State private var manuallyRecognizedPageIDs:Set<UUID> = []
+    @State private var pendingEnhancementPageIDs:[UUID] = []
+    @State private var activeEnhancementPageID:UUID?
+    @State private var enhancementBannerToken:UUID?
+    @State private var enhancementBannerShownAt:Date?
+    @State private var showEnhancementBanner = false
+    @State private var didScheduleInitialEnhancement = false
+    @State private var viewIsActive = false
 
     @Environment(\.dismiss)
     private var dismiss
@@ -65,6 +74,15 @@ struct ScanPreviewView:View {
                         }
                     }
                     .tabViewStyle(.page(indexDisplayMode:.always))
+                    .overlay(alignment:.bottom) {
+                        if showEnhancementBanner {
+                            enhancementBanner
+                                .padding(.bottom,34)
+                                .transition(
+                                    .opacity.combined(with:.move(edge:.bottom))
+                                )
+                        }
+                    }
 
                     Divider()
 
@@ -146,21 +164,41 @@ struct ScanPreviewView:View {
                     TextRecognitionView(
                         images:pages.map(\.previewImage),
                         initialPage:currentPage,
-                        initialTexts:recognizedTexts
-                    ) { pageIndex, text in
+                        initialTexts:recognizedTexts,
+                        initialResults:recognizedResults
+                    ) { pageIndex, text, result in
                         recognizedTexts[pageIndex] = text
+
+                        if let result {
+                            recognizedResults[pageIndex] = result
+                                .withPageNumber(pageIndex + 1)
+                        }
+
+                        if pages.indices.contains(pageIndex) {
+                            manuallyRecognizedPageIDs.insert(
+                                pages[pageIndex].id
+                            )
+                        }
+
                         currentPage = pageIndex
                     }
                 }
             }
         }
         .onAppear {
+            viewIsActive = true
             presentManualCropIfNeeded()
+            scheduleInitialSmartEnhancement()
         }
         .onChange(of:currentPage) { _, _ in
             presentManualCropIfNeeded()
         }
         .onDisappear {
+            viewIsActive = false
+            pendingEnhancementPageIDs.removeAll()
+            activeEnhancementPageID = nil
+            enhancementBannerToken = nil
+            showEnhancementBanner = false
             removeTemporaryPageFiles()
         }
     }
@@ -231,6 +269,7 @@ struct ScanPreviewView:View {
             }
         }
         .padding(.vertical,12)
+        .disabled(isSmartEnhancing)
     }
 
     private var saveButton:some View {
@@ -255,7 +294,7 @@ struct ScanPreviewView:View {
         }
         .padding(.horizontal)
         .padding(.bottom,15)
-        .disabled(saving || pages.isEmpty)
+        .disabled(saving || isSmartEnhancing || pages.isEmpty)
     }
 
     private func applyCropResult(
@@ -271,6 +310,7 @@ struct ScanPreviewView:View {
         // 保存用户最终确认的四角，之后再次调整时从当前裁切位置开始。
         page.detectedCorners = result.corners
         page.suggestedCropCorners = nil
+        page.smartEnhancementSeed = nil
         let preview = filteredImage(
             result.image,
             filter:page.filter
@@ -291,7 +331,15 @@ struct ScanPreviewView:View {
         }
 
         pages[index] = page
+        // 裁切会改变页面几何位置，旧 OCR 坐标不再有效。
+        recognizedResults[index] = nil
+        recognizedTexts[index] = nil
+        manuallyRecognizedPageIDs.remove(page.id)
         showCropSheet = false
+
+        if page.filter == .smart {
+            enqueueSmartEnhancement(for:page.id)
+        }
     }
 
     private func applyFilter(
@@ -316,6 +364,10 @@ struct ScanPreviewView:View {
         }
 
         pages[index] = page
+
+        if filter == .smart {
+            enqueueSmartEnhancement(for:page.id)
+        }
     }
 
     private func filteredImage(
@@ -326,6 +378,170 @@ struct ScanPreviewView:View {
             filter,
             to:image
         )
+    }
+
+    private var isSmartEnhancing:Bool {
+        activeEnhancementPageID != nil
+            || !pendingEnhancementPageIDs.isEmpty
+    }
+
+    private var enhancementBanner:some View {
+        HStack(spacing:10) {
+            ProgressView()
+                .tint(.white)
+
+            VStack(alignment:.leading, spacing:2) {
+                Text("智能优化中…")
+                    .font(.subheadline.bold())
+
+                Text("正在本机分析文字清晰度")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.82))
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal,16)
+        .padding(.vertical,10)
+        .background(
+            .black.opacity(0.72),
+            in:Capsule()
+        )
+        .shadow(color:.black.opacity(0.2), radius:8, y:3)
+    }
+
+    private func scheduleInitialSmartEnhancement() {
+        guard !didScheduleInitialEnhancement else { return }
+        didScheduleInitialEnhancement = true
+
+        for page in pages where page.filter == .smart
+                && page.detectedCorners != nil {
+            enqueueSmartEnhancement(for:page.id)
+        }
+    }
+
+    private func enqueueSmartEnhancement(for pageID:UUID) {
+        guard viewIsActive,
+              pages.contains(where:{
+                  $0.id == pageID && $0.filter == .smart
+              }),
+              activeEnhancementPageID != pageID,
+              !pendingEnhancementPageIDs.contains(pageID) else {
+            return
+        }
+
+        pendingEnhancementPageIDs.append(pageID)
+        beginEnhancementBannerDelayIfNeeded()
+        processNextSmartEnhancement()
+    }
+
+    private func processNextSmartEnhancement() {
+        guard viewIsActive,
+              activeEnhancementPageID == nil else {
+            return
+        }
+
+        while !pendingEnhancementPageIDs.isEmpty {
+            let pageID = pendingEnhancementPageIDs.removeFirst()
+
+            guard let index = pages.firstIndex(where:{
+                $0.id == pageID && $0.filter == .smart
+            }) else {
+                continue
+            }
+
+            activeEnhancementPageID = pageID
+            let sourceImage = pages[index]
+                .fullResolutionAdjustedImage()
+            let baselineSeed = pages[index].smartEnhancementSeed
+
+            SmartEnhancementPipeline.process(
+                rgbImage:sourceImage,
+                pageNumber:index + 1,
+                baselineSeed:baselineSeed
+            ) { output in
+                guard viewIsActive,
+                      activeEnhancementPageID == pageID else {
+                    return
+                }
+
+                if let currentIndex = pages.firstIndex(where:{
+                    $0.id == pageID && $0.filter == .smart
+                }) {
+                    var page = pages[currentIndex]
+
+                    do {
+                        try page.replaceStoredPreview(output.image)
+                    }
+                    catch {
+                        print("智能增强结果临时保存失败:", error)
+                        page.previewImage = output.image
+                    }
+
+                    pages[currentIndex] = page
+
+                    if !manuallyRecognizedPageIDs.contains(pageID),
+                       let result = output.ocrResult {
+                        let normalized = result.withPageNumber(
+                            currentIndex + 1
+                        )
+                        recognizedResults[currentIndex] = normalized
+                        recognizedTexts[currentIndex] = normalized.plainText
+                    }
+                }
+
+                activeEnhancementPageID = nil
+                processNextSmartEnhancement()
+                finishEnhancementBannerIfNeeded()
+            }
+
+            return
+        }
+
+        finishEnhancementBannerIfNeeded()
+    }
+
+    private func beginEnhancementBannerDelayIfNeeded() {
+        guard enhancementBannerToken == nil else { return }
+
+        let token = UUID()
+        enhancementBannerToken = token
+
+        DispatchQueue.main.asyncAfter(deadline:.now() + 0.4) {
+            guard enhancementBannerToken == token,
+                  isSmartEnhancing else {
+                return
+            }
+
+            enhancementBannerShownAt = Date()
+            withAnimation(.easeInOut(duration:0.2)) {
+                showEnhancementBanner = true
+            }
+        }
+    }
+
+    private func finishEnhancementBannerIfNeeded() {
+        guard !isSmartEnhancing else { return }
+
+        let token = enhancementBannerToken
+        let elapsed = enhancementBannerShownAt.map {
+            Date().timeIntervalSince($0)
+        } ?? 0.6
+        let delay = showEnhancementBanner
+            ? max(0, 0.6 - elapsed)
+            : 0
+
+        DispatchQueue.main.asyncAfter(deadline:.now() + delay) {
+            guard enhancementBannerToken == token,
+                  !isSmartEnhancing else {
+                return
+            }
+
+            withAnimation(.easeInOut(duration:0.2)) {
+                showEnhancementBanner = false
+            }
+            enhancementBannerShownAt = nil
+            enhancementBannerToken = nil
+        }
     }
 
     private func saveDocument() {
@@ -370,6 +586,18 @@ struct ScanPreviewView:View {
                         to:textURL,
                         atomically:true,
                         encoding:.utf8
+                    )
+                }
+
+                if let result = recognizedResults[index] {
+                    let structuredURL = OCRStorage.fileURL(
+                        in:folderURL,
+                        pageNumber:index + 1
+                    )
+
+                    try OCRStorage.write(
+                        result.withPageNumber(index + 1),
+                        to:structuredURL
                     )
                 }
             }

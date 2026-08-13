@@ -26,6 +26,7 @@ final class OCRIndexManager:ObservableObject {
         let pageNumber:Int
         let imageURL:URL
         let textURL:URL
+        let structuredURL:URL
     }
 
     private struct IndexRequest {
@@ -181,7 +182,22 @@ final class OCRIndexManager:ObservableObject {
         let candidates = documents.filter { document in
             let text = document.searchableText?
                 .trimmingCharacters(in:.whitespacesAndNewlines)
+
+            guard let folderURL = ScanManager.shared.folderURL(
+                for:document
+            ) else {
+                return text?.isEmpty != false
+            }
+
+            let hasMissingStructuredResult = Self.pageSources(
+                in:folderURL
+            )
+            .contains {
+                OCRStorage.load(from:$0.structuredURL) == nil
+            }
+
             return text?.isEmpty != false
+                || hasMissingStructuredResult
         }
 
         batchCompleted = 0
@@ -363,20 +379,36 @@ final class OCRIndexManager:ObservableObject {
 
         let page = request.pages[position]
 
+        let existingText = (try? String(
+            contentsOf:page.textURL,
+            encoding:.utf8
+        ))?
+        .trimmingCharacters(in:.whitespacesAndNewlines)
+
+        let usableExistingText = existingText?.isEmpty == false
+            ? existingText
+            : nil
+
+        let hasStructuredResult = OCRStorage.load(
+            from:page.structuredURL
+        ) != nil
+
         if !request.force,
-           let existing = try? String(
-                contentsOf:page.textURL,
-                encoding:.utf8
-           ),
-           !existing.trimmingCharacters(
-                in:.whitespacesAndNewlines
-           ).isEmpty {
+           let usableExistingText,
+           hasStructuredResult {
             recognizePage(
                 at:position + 1,
                 request:request,
-                collectedTexts:collectedTexts + [existing]
+                collectedTexts:
+                    collectedTexts + [usableExistingText]
             )
             return
+        }
+
+        if request.force {
+            OCRStorage.removeIfPresent(
+                at:page.structuredURL
+            )
         }
 
         guard let image = Self.downsampledImage(
@@ -390,20 +422,24 @@ final class OCRIndexManager:ObservableObject {
             recognizePage(
                 at:position + 1,
                 request:request,
-                collectedTexts:collectedTexts + [""]
+                collectedTexts:
+                    collectedTexts + [usableExistingText ?? ""]
             )
             return
         }
 
         LocalTextRecognizer.recognize(
             image:image,
+            pageNumber:page.pageNumber,
             background:true
         ) { result in
             var pageText = ""
+            var pageResult:OCRPageResult?
 
             switch result {
-            case .success(let recognizedText):
-                pageText = recognizedText
+            case .success(let recognizedResult):
+                pageResult = recognizedResult
+                pageText = recognizedResult.plainText
             case .failure(let error):
                 print(
                     "后台文字识别未取得结果:",
@@ -436,6 +472,21 @@ final class OCRIndexManager:ObservableObject {
                     "文字索引文件保存失败:",
                     error.localizedDescription
                 )
+            }
+
+            if let pageResult {
+                do {
+                    try OCRStorage.write(
+                        pageResult,
+                        to:page.structuredURL
+                    )
+                }
+                catch {
+                    print(
+                        "结构化 OCR 文件保存失败:",
+                        error.localizedDescription
+                    )
+                }
             }
 
             DispatchQueue.main.async { [weak self] in
@@ -598,6 +649,10 @@ final class OCRIndexManager:ObservableObject {
                 imageURL:imageURL,
                 textURL:folderURL.appendingPathComponent(
                     "recognized_\(pageNumber).txt"
+                ),
+                structuredURL:OCRStorage.fileURL(
+                    in:folderURL,
+                    pageNumber:pageNumber
                 )
             )
         }

@@ -45,6 +45,9 @@ struct ScanPage:Identifiable {
     var detectedCorners:ScanCorners?
     var suggestedCropCorners:ScanCorners?
     var filter:ScanPageFilter
+    /// Transient OCR captured while comparing recovery candidates. This is
+    /// intentionally kept in memory only and invalidated after geometry edits.
+    var smartEnhancementSeed:SmartEnhancementSeed?
     private(set) var temporaryDirectoryURL:URL?
     private(set) var originalImageURL:URL?
     private(set) var adjustedImageURL:URL?
@@ -57,7 +60,8 @@ struct ScanPage:Identifiable {
         previewImage:UIImage,
         detectedCorners:ScanCorners?,
         suggestedCropCorners:ScanCorners? = nil,
-        filter:ScanPageFilter = .smart
+        filter:ScanPageFilter = .smart,
+        smartEnhancementSeed:SmartEnhancementSeed? = nil
     ) {
         self.id = id
         self.originalImage = originalImage
@@ -66,6 +70,7 @@ struct ScanPage:Identifiable {
         self.detectedCorners = detectedCorners
         self.suggestedCropCorners = suggestedCropCorners
         self.filter = filter
+        self.smartEnhancementSeed = smartEnhancementSeed
         self.temporaryDirectoryURL = nil
         self.originalImageURL = nil
         self.adjustedImageURL = nil
@@ -401,6 +406,7 @@ private struct SmallDocumentDetectionResult {
     let textObservationCount:Int
     let textObservations:[VNRecognizedTextObservation]
     let detectionSource:String
+    let selectionReason:String
 }
 
 
@@ -454,6 +460,96 @@ enum DocumentRectangleSelector {
                     textObservations:textObservations
                 )
             }
+    }
+
+
+    /// Chooses between a complete outer page and a possible two-page spread.
+    ///
+    /// A complete page takes priority when it encloses almost all of the pair.
+    /// This prevents two internal rectangles on one A4 sheet from being merged
+    /// as a book, while preserving a real spread when the best single candidate
+    /// is only one of its pages.
+    static func bestFallbackSelection(
+        in observations:[VNRectangleObservation],
+        textObservations:[VNRecognizedTextObservation]
+    )->(
+        rectangles:[VNRectangleObservation],
+        reason:String
+    ) {
+        let selectedPair = bestBookPagePair(
+            in:observations,
+            textObservations:textObservations
+        )
+        let selectedSingle = bestSmallDocument(
+            in:observations,
+            textObservations:textObservations
+        )
+
+        switch (selectedSingle, selectedPair) {
+        case (.none, .none):
+            return (
+                [],
+                "没有通过规则的完整单页或左右书页候选"
+            )
+
+        case (.some(let single), .none):
+            return (
+                [single],
+                "仅检测到可信完整单页"
+            )
+
+        case (.none, .some(let pair)):
+            return (
+                pair,
+                "没有可信完整单页，采用左右书页候选"
+            )
+
+        case (.some(let single), .some(let pair)):
+            let pairUnion = pair
+                .map(\.boundingBox)
+                .reduce(CGRect.null) {
+                    $0.union($1)
+                }
+            let singleBox = single.boundingBox
+            let pairArea = pairUnion.width * pairUnion.height
+            let singleArea = singleBox.width * singleBox.height
+            let intersection = singleBox.intersection(pairUnion)
+            let intersectionArea = intersection.isNull
+                ? 0
+                : intersection.width * intersection.height
+            let pairCoverage = intersectionArea
+                / max(pairArea, 0.0001)
+            let edgeTolerance:CGFloat = 0.025
+            let enclosesPairEdges =
+                singleBox.minX <= pairUnion.minX + edgeTolerance
+                && singleBox.maxX >= pairUnion.maxX - edgeTolerance
+                && singleBox.minY <= pairUnion.minY + edgeTolerance
+                && singleBox.maxY >= pairUnion.maxY - edgeTolerance
+            let singleIsCredibleOuterPage =
+                pairCoverage >= 0.86
+                && singleArea >= pairArea * 0.86
+                && enclosesPairEdges
+
+            if singleIsCredibleOuterPage {
+                return (
+                    [single],
+                    String(
+                        format:
+                            "完整单页覆盖左右候选 %.0f%%，优先采用外围单页",
+                        pairCoverage * 100
+                    )
+                )
+            }
+
+            return (
+                pair,
+                String(
+                    format:
+                        "完整单页仅覆盖左右候选 %.0f%%，采用左右书页",
+                    pairCoverage * 100
+                )
+            )
+        }
     }
 
 
@@ -514,6 +610,14 @@ enum DocumentRectangleSelector {
                     rightBox.minX - leftBox.maxX,
                     0
                 )
+                let firstTextCount = textObservations.filter {
+                    firstBox.intersects($0.boundingBox)
+                }
+                .count
+                let secondTextCount = textObservations.filter {
+                    secondBox.intersects($0.boundingBox)
+                }
+                .count
 
                 guard smallerArea / max(largerArea, 0.0001) >= 0.50,
                       overlapArea / max(smallerArea, 0.0001) <= 0.20,
@@ -524,7 +628,9 @@ enum DocumentRectangleSelector {
                       leftBox.midX < 0.52,
                       rightBox.midX > 0.48,
                       union.width >= union.height * 1.05,
-                      unionCenterDistance <= 0.25 else {
+                      unionCenterDistance <= 0.25,
+                      firstTextCount >= 1,
+                      secondTextCount >= 1 else {
                     continue
                 }
 
@@ -1182,6 +1288,8 @@ class ScanProcessor {
     func process(
         image:UIImage,
         preferredCorners:ScanCorners? = nil,
+        preferredCornerStability:CaptureCornerStability? = nil,
+        pageNumber:Int = 1,
         completion:@escaping([ScanPage])->Void
     ){
         queue.async {
@@ -1220,6 +1328,7 @@ class ScanProcessor {
                 var result = fixed
                 var detectedCorners:ScanCorners?
                 var suggestedCropCorners:ScanCorners?
+                var allowsAlternateRecoveryCorners = false
 
 
                 if let rectangle {
@@ -1232,6 +1341,7 @@ class ScanProcessor {
                         )
                     )
                     detectedCorners = selectedCorners
+                    allowsAlternateRecoveryCorners = true
 
                     result = self.correct(
                         image:fixed,
@@ -1321,7 +1431,9 @@ class ScanProcessor {
                                 textObservations:
                                     fallback.textObservations,
                                 detectionSource:
-                                    enhanced.detectionSource
+                                    enhanced.detectionSource,
+                                selectionReason:
+                                    enhanced.selectionReason
                             )
                         }
 
@@ -1356,7 +1468,7 @@ class ScanProcessor {
                                         fallback.rectangleCandidateCount,
                                         fallback.textObservationCount,
                                         self.cornerDiagnosticDetails(selectedCorners)
-                                    )
+                                    ) + "；" + fallback.selectionReason
                                 )
                             }
                             else {
@@ -1405,7 +1517,7 @@ class ScanProcessor {
                                         fallback.textObservationCount,
                                         DocumentRectangleSelector
                                             .diagnosticDetails(for:rectangle)
-                                    )
+                                    ) + "；" + fallback.selectionReason
                                 )
                             }
                             else {
@@ -1459,16 +1571,41 @@ class ScanProcessor {
                 }
 
 
-                let page = self.makeScanPage(
-                    originalImage:fixed,
-                    adjustedImage:result,
-                    detectedCorners:detectedCorners,
-                    suggestedCropCorners:suggestedCropCorners
-                )
+                SmartDocumentRecovery.process(
+                    sourceImage:fixed,
+                    currentImage:result,
+                    currentCorners:detectedCorners,
+                    stableCorners:preferredCorners,
+                    stability:preferredCornerStability,
+                    allowsAlternateCorners:
+                        allowsAlternateRecoveryCorners,
+                    pageNumber:pageNumber,
+                    correct:{ image, corners in
+                        self.correct(
+                            image:image,
+                            corners:corners
+                        )
+                    }
+                ) { recoveryOutput in
+                    self.queue.async {
+                        autoreleasepool {
+                            let page = self.makeScanPage(
+                                originalImage:fixed,
+                                adjustedImage:recoveryOutput.image,
+                                detectedCorners:
+                                    recoveryOutput.corners
+                                        ?? detectedCorners,
+                                suggestedCropCorners:
+                                    suggestedCropCorners,
+                                smartEnhancementSeed:
+                                    recoveryOutput.enhancementSeed
+                            )
 
-
-                DispatchQueue.main.async {
-                    completion([page])
+                            DispatchQueue.main.async {
+                                completion([page])
+                            }
+                        }
+                    }
                 }
 
 
@@ -1533,7 +1670,9 @@ class ScanProcessor {
                             textObservations:
                                 fallback.textObservations,
                             detectionSource:
-                                enhanced.detectionSource
+                                enhanced.detectionSource,
+                            selectionReason:
+                                enhanced.selectionReason
                         )
                     }
 
@@ -1573,7 +1712,8 @@ class ScanProcessor {
         originalImage:UIImage,
         adjustedImage:UIImage,
         detectedCorners:ScanCorners?,
-        suggestedCropCorners:ScanCorners?
+        suggestedCropCorners:ScanCorners?,
+        smartEnhancementSeed:SmartEnhancementSeed? = nil
     )->ScanPage {
         let previewImage = DocumentImageFilter.apply(
             .smart,
@@ -1585,7 +1725,8 @@ class ScanProcessor {
             previewImage:previewImage,
             detectedCorners:detectedCorners,
             suggestedCropCorners:suggestedCropCorners,
-            filter:.smart
+            filter:.smart,
+            smartEnhancementSeed:smartEnhancementSeed
         )
 
         do {
@@ -1691,29 +1832,22 @@ class ScanProcessor {
 
             let rectangles = rectangleRequest.results ?? []
             let texts = textRequest.results ?? []
-            let selectedPair = DocumentRectangleSelector
-                .bestBookPagePair(
+            let selection = DocumentRectangleSelector
+                .bestFallbackSelection(
                     in:rectangles,
                     textObservations:texts
                 )
-            let selectedSingle = DocumentRectangleSelector
-                .bestSmallDocument(
-                    in:rectangles,
-                    textObservations:texts
-                )
-            let selectedRectangles = selectedPair
-                ?? selectedSingle.map { [$0] }
-                ?? []
 
             return SmallDocumentDetectionResult(
-                selectedRectangles:selectedRectangles,
+                selectedRectangles:selection.rectangles,
                 suggestedCropCorners:estimatedCropCorners(
                     from:texts
                 ),
                 rectangleCandidateCount:rectangles.count,
                 textObservationCount:texts.count,
                 textObservations:texts,
-                detectionSource:"原图兜底"
+                detectionSource:"原图兜底",
+                selectionReason:selection.reason
             )
         }
         catch {
@@ -1730,7 +1864,8 @@ class ScanProcessor {
                 rectangleCandidateCount:0,
                 textObservationCount:0,
                 textObservations:[],
-                detectionSource:"原图兜底"
+                detectionSource:"原图兜底",
+                selectionReason:"宽松识别请求失败"
             )
         }
     }
@@ -1786,19 +1921,12 @@ class ScanProcessor {
         let rectangles = channelResults.flatMap {
             $0.rectangles
         }
-        let selectedPair = DocumentRectangleSelector
-            .bestBookPagePair(
+        let selection = DocumentRectangleSelector
+            .bestFallbackSelection(
                 in:rectangles,
                 textObservations:textObservations
             )
-        let selectedSingle = DocumentRectangleSelector
-            .bestSmallDocument(
-                in:rectangles,
-                textObservations:textObservations
-            )
-        let selectedRectangles = selectedPair
-            ?? selectedSingle.map { [$0] }
-            ?? []
+        let selectedRectangles = selection.rectangles
 
         let sourceNames = channelResults.compactMap { channel in
             selectedRectangles.contains { selected in
@@ -1819,7 +1947,8 @@ class ScanProcessor {
             rectangleCandidateCount:rectangles.count,
             textObservationCount:textObservations.count,
             textObservations:textObservations,
-            detectionSource:detectionSource
+            detectionSource:detectionSource,
+            selectionReason:selection.reason
         )
     }
 
@@ -2318,19 +2447,34 @@ enum LocalTextRecognizer {
         qos:.utility
     )
 
+    /// Recovery compares at most two candidates. A dedicated concurrent queue
+    /// lets both Vision requests run together without changing the serial OCR
+    /// behavior used by indexing and the rest of the app.
+    private static let recoveryComparisonQueue = DispatchQueue(
+        label:"aoi.scan.text-recovery-comparison",
+        qos:.userInitiated,
+        attributes:.concurrent
+    )
+
     static func recognize(
         image:UIImage,
+        pageNumber:Int = 1,
         background:Bool = false,
-        completion:@escaping (Result<String,Error>)->Void
+        recoveryComparison:Bool = false,
+        completion:@escaping (Result<OCRPageResult,Error>)->Void
     ) {
         guard let cgImage = image.cgImage else {
             completion(.failure(TextRecognitionError.invalidImage))
             return
         }
 
-        let queue = background
-            ? backgroundQueue
-            : interactiveQueue
+        let queue:DispatchQueue
+        if recoveryComparison {
+            queue = recoveryComparisonQueue
+        }
+        else {
+            queue = background ? backgroundQueue : interactiveQueue
+        }
 
         queue.async {
             autoreleasepool {
@@ -2359,20 +2503,48 @@ enum LocalTextRecognizer {
                             < second.boundingBox.minX
                     }
 
-                    let text = ordered.compactMap {
-                        $0.topCandidates(1).first?.string
-                    }
-                    .joined(separator:"\n")
-                    .trimmingCharacters(in:.whitespacesAndNewlines)
+                    let blocks:[OCRBlock] = ordered.compactMap {
+                        observation in
 
-                    guard !text.isEmpty else {
+                        guard let candidate = observation
+                            .topCandidates(1)
+                            .first else {
+                            return nil
+                        }
+
+                        let text = candidate.string
+                            .trimmingCharacters(
+                                in:.whitespacesAndNewlines
+                            )
+
+                        guard !text.isEmpty else {
+                            return nil
+                        }
+
+                        return OCRBlock(
+                            text:text,
+                            boundingBox:observation.boundingBox,
+                            confidence:candidate.confidence
+                        )
+                    }
+
+                    guard !blocks.isEmpty else {
                         completion(
                             .failure(TextRecognitionError.noTextFound)
                         )
                         return
                     }
 
-                    completion(.success(text))
+                    completion(
+                        .success(
+                            OCRPageResult(
+                                pageNumber:pageNumber,
+                                imageWidth:cgImage.width,
+                                imageHeight:cgImage.height,
+                                blocks:blocks
+                            )
+                        )
+                    )
                 }
 
                 request.recognitionLevel = .accurate
@@ -2407,16 +2579,20 @@ struct TextRecognitionView:View {
     }
 
     private let images:[UIImage]
-    private let onSave:(Int,String)->Void
+    private let onSave:(Int,String,OCRPageResult?)->Void
 
     @State private var pageIndex:Int
     @State private var text:String
     @State private var pageTexts:[Int:String]
+    @State private var pageResults:[Int:OCRPageResult]
     @State private var loadedPages:Set<Int>
     @State private var isRecognizing = false
     @State private var errorMessage:String?
     @State private var copied = false
     @State private var textShareItem:TextShareItem?
+#if DEBUG
+    @State private var showDocumentDebug = false
+#endif
 
     @Environment(\.dismiss)
     private var dismiss
@@ -2425,19 +2601,28 @@ struct TextRecognitionView:View {
         images:[UIImage],
         initialPage:Int,
         initialTexts:[Int:String],
-        onSave:@escaping (Int,String)->Void
+        initialResults:[Int:OCRPageResult] = [:],
+        onSave:@escaping (Int,String,OCRPageResult?)->Void
     ) {
         let safePage = images.isEmpty
             ? 0
             : min(max(initialPage, 0), images.count - 1)
 
+        var seededTexts = initialTexts
+
+        for (index, result) in initialResults
+            where seededTexts[index] == nil {
+            seededTexts[index] = result.plainText
+        }
+
         self.images = images
         self.onSave = onSave
         _pageIndex = State(initialValue:safePage)
-        _text = State(initialValue:initialTexts[safePage] ?? "")
-        _pageTexts = State(initialValue:initialTexts)
+        _text = State(initialValue:seededTexts[safePage] ?? "")
+        _pageTexts = State(initialValue:seededTexts)
+        _pageResults = State(initialValue:initialResults)
         _loadedPages = State(
-            initialValue:Set(initialTexts.keys)
+            initialValue:Set(seededTexts.keys)
         )
     }
 
@@ -2461,6 +2646,22 @@ struct TextRecognitionView:View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                }
+
+                if let recognitionSummary {
+                    HStack(spacing:7) {
+                        Image(systemName:"text.viewfinder")
+                            .foregroundStyle(.blue)
+
+                        Text(recognitionSummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+                    }
+                    .padding(.horizontal,16)
+                    .padding(.vertical,8)
+                    .background(Color(.secondarySystemBackground))
                 }
 
                 Divider()
@@ -2551,6 +2752,16 @@ struct TextRecognitionView:View {
                 }
 
                 ToolbarItemGroup(placement:.topBarTrailing) {
+#if DEBUG
+                    Button {
+                        showDocumentDebug = true
+                    } label: {
+                        Image(systemName:"square.3.layers.3d")
+                    }
+                    .accessibilityLabel("Document structure debug")
+                    .disabled(pageResults[pageIndex] == nil)
+#endif
+
                     Button {
                         prepareTextFileForSharing()
                     } label: {
@@ -2589,6 +2800,29 @@ struct TextRecognitionView:View {
         .sheet(item:$textShareItem) { item in
             ShareSheet(activityItems:[item.url])
         }
+#if DEBUG
+        .sheet(isPresented:$showDocumentDebug) {
+            if images.indices.contains(pageIndex),
+               let result = pageResults[pageIndex] {
+                NavigationStack {
+                    DocumentDebugOverlay(
+                        image:images[pageIndex],
+                        blocks:result.documentBlocks
+                    )
+                    .padding()
+                    .navigationTitle("Document Structure")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement:.topBarTrailing) {
+                            Button("Done") {
+                                showDocumentDebug = false
+                            }
+                        }
+                    }
+                }
+            }
+        }
+#endif
         .onAppear {
             if !loadedPages.contains(pageIndex) {
                 recognizeText()
@@ -2605,6 +2839,23 @@ struct TextRecognitionView:View {
             "第 %@ 页 / 共 %@ 页",
             String(pageIndex + 1),
             String(images.count)
+        )
+    }
+
+    private var recognitionSummary:String? {
+        guard let result = pageResults[pageIndex],
+              let averageConfidence = result.averageConfidence else {
+            return nil
+        }
+
+        let percentage = Int(
+            (averageConfidence * 100).rounded()
+        )
+
+        return L10n.format(
+            "已识别 %@ 个文字区域 · 平均置信度 %@%%",
+            String(result.blocks.count),
+            String(percentage)
         )
     }
 
@@ -2649,7 +2900,11 @@ struct TextRecognitionView:View {
     private func saveCurrentPage() {
         pageTexts[pageIndex] = text
         loadedPages.insert(pageIndex)
-        onSave(pageIndex, text)
+        onSave(
+            pageIndex,
+            text,
+            pageResults[pageIndex]
+        )
     }
 
     private func changePage(by offset:Int) {
@@ -2684,7 +2939,8 @@ struct TextRecognitionView:View {
         copied = false
 
         LocalTextRecognizer.recognize(
-            image:images[recognitionPage]
+            image:images[recognitionPage],
+            pageNumber:recognitionPage + 1
         ) { result in
             DispatchQueue.main.async {
                 guard recognitionPage == pageIndex else {
@@ -2695,9 +2951,11 @@ struct TextRecognitionView:View {
                 loadedPages.insert(recognitionPage)
 
                 switch result {
-                case .success(let recognizedText):
+                case .success(let pageResult):
+                    let recognizedText = pageResult.plainText
                     text = recognizedText
                     pageTexts[recognitionPage] = recognizedText
+                    pageResults[recognitionPage] = pageResult
                 case .failure(let error):
                     errorMessage = error.localizedDescription
                 }

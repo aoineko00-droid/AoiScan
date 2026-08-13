@@ -5,6 +5,62 @@
 
 import Foundation
 import Combine
+import AVFoundation
+
+
+enum CameraFlashMode:String,CaseIterable,Identifiable {
+    case off
+    case automatic
+    case on
+
+    static let storageKey = "camera.defaultFlashMode"
+
+    var id:String { rawValue }
+
+    var title:String {
+        switch self {
+        case .off:
+            return L10n.text("关闭")
+        case .automatic:
+            return L10n.text("自动")
+        case .on:
+            return L10n.text("开启")
+        }
+    }
+
+    var captureMode:AVCaptureDevice.FlashMode {
+        switch self {
+        case .off:
+            return .off
+        case .automatic:
+            return .auto
+        case .on:
+            return .on
+        }
+    }
+
+    var symbolName:String {
+        switch self {
+        case .off:
+            return "bolt.slash"
+        case .automatic:
+            return "bolt"
+        case .on:
+            return "bolt.fill"
+        }
+    }
+
+    var next:CameraFlashMode {
+        switch self {
+        case .off:
+            return .automatic
+        case .automatic:
+            return .on
+        case .on:
+            return .off
+        }
+    }
+}
 
 
 enum RecognitionSettings {
@@ -14,8 +70,6 @@ enum RecognitionSettings {
             "recognition.smallDocumentFallback"
         static let captureGuidance =
             "recognition.captureGuidance"
-        static let defaultFlash =
-            "camera.defaultFlash"
     }
 
 
@@ -61,22 +115,21 @@ enum RecognitionSettings {
     }
 
 
-    static var defaultFlashEnabled:Bool {
+    static var defaultFlashMode:CameraFlashMode {
         get {
-            if UserDefaults.standard.object(
-                forKey:Key.defaultFlash
-            ) == nil {
-                return true
+            guard let rawValue = UserDefaults.standard.string(
+                forKey:CameraFlashMode.storageKey
+            ),
+                  let mode = CameraFlashMode(rawValue:rawValue) else {
+                return .off
             }
 
-            return UserDefaults.standard.bool(
-                forKey:Key.defaultFlash
-            )
+            return mode
         }
         set {
             UserDefaults.standard.set(
-                newValue,
-                forKey:Key.defaultFlash
+                newValue.rawValue,
+                forKey:CameraFlashMode.storageKey
             )
         }
     }

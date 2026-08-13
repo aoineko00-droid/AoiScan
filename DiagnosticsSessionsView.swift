@@ -22,13 +22,7 @@ struct DiagnosticsSessionsView: View {
                 ForEach(sessions, id: \ .session.id) { s in
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Text(
-                                L10n.text(
-                                    s.session.multiPage
-                                    ? "多页会话"
-                                    : "单页会话"
-                                )
-                            )
+                            Text(sessionTitle(s))
                                 .font(.subheadline).bold()
                             Spacer()
                             Text(s.createdAt, style: .date)
@@ -60,6 +54,14 @@ struct DiagnosticsSessionsView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+
+                        if let details = eventDetails(s),
+                           !details.isEmpty {
+                            Text(details)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                        }
                     }
                     .padding(.vertical, 4)
                 }
@@ -85,6 +87,33 @@ struct DiagnosticsSessionsView: View {
                     .transition(.opacity)
             }
         }
+    }
+
+    private func sessionTitle(_ session:SessionLog)->String {
+        guard let result = session.captures.first?.result,
+              let route = result.route,
+              route.hasPrefix("event:") else {
+            return L10n.text(
+                session.session.multiPage
+                    ? "多页会话"
+                    : "单页会话"
+            )
+        }
+
+        let category = String(route.dropFirst("event:".count))
+        let message = result.error?.domain ?? ""
+        return message.isEmpty
+            ? category
+            : "\(category) · \(message)"
+    }
+
+    private func eventDetails(_ session:SessionLog)->String? {
+        guard let result = session.captures.first?.result,
+              result.route?.hasPrefix("event:") == true else {
+            return nil
+        }
+
+        return result.error?.message
     }
 
     private func load() {

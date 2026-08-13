@@ -18,8 +18,8 @@ struct AppSettingsView:View {
     @AppStorage("recognition.captureGuidance")
     private var captureGuidanceEnabled = true
 
-    @AppStorage("camera.defaultFlash")
-    private var defaultFlashEnabled = true
+    @AppStorage(CameraFlashMode.storageKey)
+    private var defaultFlashMode = CameraFlashMode.off.rawValue
 
     @AppStorage(OCRIndexManager.automaticIndexingKey)
     private var automaticTextIndexEnabled = true
@@ -56,13 +56,21 @@ struct AppSettingsView:View {
             }
 
             Section("拍摄") {
-                Toggle(
-                    "默认开启闪光灯",
-                    isOn:$defaultFlashEnabled
-                )
+                Picker(
+                    "默认闪光灯",
+                    selection:$defaultFlashMode
+                ) {
+                    ForEach(CameraFlashMode.allCases) { mode in
+                        Label(
+                            mode.title,
+                            systemImage:mode.symbolName
+                        )
+                        .tag(mode.rawValue)
+                    }
+                }
 
                 Text(
-                    "开启后，每次进入扫描相机都会默认使用闪光灯；仍可在拍摄页面临时关闭或重新开启。"
+                    "默认为关闭；自动模式会根据环境亮度决定是否闪光。拍摄页面的临时修改只影响当前扫描。"
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)

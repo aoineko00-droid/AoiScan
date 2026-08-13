@@ -6,6 +6,7 @@
 import UIKit
 import AVFoundation
 import Vision
+import ImageIO
 
 
 
@@ -16,67 +17,6 @@ protocol ScannerViewControllerDelegate: AnyObject {
     )
     
 }
-
-
-
-
-private enum CaptureOrientationMode:CaseIterable {
-    case automatic
-    case portrait
-    case landscapeTopLeft
-    case landscapeTopRight
-
-    var title:String {
-        switch self {
-        case .automatic:
-            return L10n.text("自动")
-        case .portrait:
-            return L10n.text("竖屏")
-        case .landscapeTopLeft:
-            return L10n.text("横屏（手机顶部朝左）")
-        case .landscapeTopRight:
-            return L10n.text("横屏（手机顶部朝右）")
-        }
-    }
-
-    var shortTitle:String {
-        switch self {
-        case .automatic:
-            return L10n.text("自动")
-        case .portrait:
-            return L10n.text("竖屏")
-        case .landscapeTopLeft, .landscapeTopRight:
-            return L10n.text("横屏")
-        }
-    }
-
-    var symbolName:String {
-        switch self {
-        case .automatic:
-            return "arrow.triangle.2.circlepath.camera"
-        case .portrait:
-            return "rectangle.portrait"
-        case .landscapeTopLeft:
-            return "rectangle"
-        case .landscapeTopRight:
-            return "rectangle"
-        }
-    }
-
-    var fixedRotationAngle:CGFloat? {
-        switch self {
-        case .automatic:
-            return nil
-        case .portrait:
-            return 90
-        case .landscapeTopLeft:
-            return 0
-        case .landscapeTopRight:
-            return 180
-        }
-    }
-}
-
 
 
 
@@ -160,7 +100,13 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
     private var stableDocumentCorners:ScanCorners?
 
 
+    private var stableDocumentStability:CaptureCornerStability?
+
+
     private var captureReferenceCorners:ScanCorners?
+
+
+    private var captureReferenceStability:CaptureCornerStability?
 
 
     private let focusExposureWaitLimit:
@@ -204,8 +150,8 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
     
     // MARK: Flash
     
-    private var flashOn =
-    RecognitionSettings.defaultFlashEnabled
+    private var flashMode =
+    RecognitionSettings.defaultFlashMode
     
     
     private var isCameraReady =
@@ -225,10 +171,6 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
     private var currentCaptureRotationAngle:
     CGFloat = 90
-
-
-    private var captureOrientationMode:
-    CaptureOrientationMode = .automatic
 
 
     private var lastValidDeviceOrientation:
@@ -271,10 +213,6 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
     UIButton(type:.system)
 
 
-    private let orientationButton =
-    UIButton(type:.system)
-
-
     private let doneButton =
     UIButton(type:.system)
     
@@ -292,6 +230,34 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
 
     private var lastGuidanceMessage = ""
+
+
+    private let processingOverlay = UIView()
+
+
+    private let capturedImageView = UIImageView()
+
+
+    private let processingCard = UIVisualEffectView(
+        effect:UIBlurEffect(style:.systemMaterialDark)
+    )
+
+
+    private let processingIcon = UIImageView()
+
+
+    private let processingTitleLabel = UILabel()
+
+
+    private let processingDetailLabel = UILabel()
+
+
+    private let processingIndicator = UIActivityIndicatorView(
+        style:.medium
+    )
+
+
+    private var processingMessageWorkItems:[DispatchWorkItem] = []
     
     
     
@@ -515,7 +481,10 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
     private func setupPreviewLayer(){
 
         previewLayer.session = session
-        previewLayer.videoGravity = .resizeAspectFill
+        // 完整显示相机的 4:3 画面，不再为铺满长屏而裁掉左右两侧。
+        // 竖屏会自然呈现 3:4，横屏会自然呈现 4:3；黑色留白区域
+        // 同时用于承载顶部和底部控制按钮。
+        previewLayer.videoGravity = .resizeAspect
 
         view.layer.insertSublayer(
             previewLayer,
@@ -600,8 +569,7 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
     private func deviceOrientationDidChange(){
         guard rememberDeviceOrientationIfValid(
             UIDevice.current.orientation
-        ),
-              captureOrientationMode == .automatic else {
+        ) else {
             return
         }
 
@@ -805,8 +773,6 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
         flashButton.isEnabled = available
         flashButton.alpha = available ? 1 : 0.5
-        orientationButton.isEnabled = available
-        orientationButton.alpha = available ? 1 : 0.5
     }
 
 
@@ -846,12 +812,7 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
         let previewRotationAngle:CGFloat
         let captureRotationAngle:CGFloat
 
-        if let fixedRotationAngle =
-            captureOrientationMode.fixedRotationAngle {
-            previewRotationAngle = fixedRotationAngle
-            captureRotationAngle = fixedRotationAngle
-        }
-        else if let lastValidDeviceOrientation,
+        if let lastValidDeviceOrientation,
                 let deviceRotationAngle = deviceRotationAngle(
                     for:lastValidDeviceOrientation
                 ) {
@@ -889,7 +850,9 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
         if orientationChanged {
             stableDocumentCorners = nil
+            stableDocumentStability = nil
             captureReferenceCorners = nil
+            captureReferenceStability = nil
         }
 
         let visionOrientation = visionOrientation(
@@ -1077,7 +1040,7 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
             true
 
 
-            // 常亮灯保持关闭；拍照闪光仍由 flashOn 控制，默认开启。
+            // 常亮灯保持关闭；拍照闪光由当前关闭/自动/开启模式控制。
             if camera.hasTorch {
                 camera.torchMode = .off
             }
@@ -1160,45 +1123,6 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
         ])
 
 
-        // MARK: 拍摄方向
-
-        orientationButton.translatesAutoresizingMaskIntoConstraints = false
-        orientationButton.tintColor = .white
-        orientationButton.setTitleColor(
-            .white,
-            for:.normal
-        )
-        orientationButton.titleLabel?.font = .systemFont(
-            ofSize:13,
-            weight:.semibold
-        )
-        orientationButton.backgroundColor = UIColor.black.withAlphaComponent(
-            0.48
-        )
-        orientationButton.layer.cornerRadius = 18
-        orientationButton.showsMenuAsPrimaryAction = true
-        updateOrientationMenu()
-
-        view.addSubview(orientationButton)
-
-        NSLayoutConstraint.activate([
-            orientationButton.leadingAnchor.constraint(
-                equalTo:view.leadingAnchor,
-                constant:20
-            ),
-            orientationButton.topAnchor.constraint(
-                equalTo:view.safeAreaLayoutGuide.topAnchor,
-                constant:20
-            ),
-            orientationButton.widthAnchor.constraint(
-                equalToConstant:82
-            ),
-            orientationButton.heightAnchor.constraint(
-                equalToConstant:40
-            )
-        ])
-        
-        
         NSLayoutConstraint.activate([
             
             
@@ -1451,8 +1375,169 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
                 greaterThanOrEqualToConstant:38
             )
         ])
+
+
+        // MARK: 拍摄完成过渡层
+
+        processingOverlay.translatesAutoresizingMaskIntoConstraints = false
+        processingOverlay.backgroundColor = .black
+        processingOverlay.alpha = 0
+        processingOverlay.isHidden = true
+        view.addSubview(processingOverlay)
+
+        capturedImageView.translatesAutoresizingMaskIntoConstraints = false
+        capturedImageView.contentMode = .scaleAspectFill
+        capturedImageView.clipsToBounds = true
+        processingOverlay.addSubview(capturedImageView)
+
+        let dimView = UIView()
+        dimView.translatesAutoresizingMaskIntoConstraints = false
+        dimView.backgroundColor = UIColor.black.withAlphaComponent(0.22)
+        processingOverlay.addSubview(dimView)
+
+        processingCard.translatesAutoresizingMaskIntoConstraints = false
+        processingCard.layer.cornerRadius = 20
+        processingCard.layer.masksToBounds = true
+        processingOverlay.addSubview(processingCard)
+
+        processingIcon.translatesAutoresizingMaskIntoConstraints = false
+        processingIcon.tintColor = .systemGreen
+        processingIcon.contentMode = .scaleAspectFit
+        processingCard.contentView.addSubview(processingIcon)
+
+        processingTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        processingTitleLabel.textColor = .white
+        processingTitleLabel.font = .systemFont(ofSize:19, weight:.semibold)
+        processingTitleLabel.textAlignment = .center
+        processingCard.contentView.addSubview(processingTitleLabel)
+
+        processingDetailLabel.translatesAutoresizingMaskIntoConstraints = false
+        processingDetailLabel.textColor = UIColor.white.withAlphaComponent(0.78)
+        processingDetailLabel.font = .systemFont(ofSize:14, weight:.regular)
+        processingDetailLabel.textAlignment = .center
+        processingDetailLabel.numberOfLines = 2
+        processingCard.contentView.addSubview(processingDetailLabel)
+
+        processingIndicator.translatesAutoresizingMaskIntoConstraints = false
+        processingIndicator.color = .white
+        processingIndicator.hidesWhenStopped = true
+        processingCard.contentView.addSubview(processingIndicator)
+
+        NSLayoutConstraint.activate([
+            processingOverlay.leadingAnchor.constraint(equalTo:view.leadingAnchor),
+            processingOverlay.trailingAnchor.constraint(equalTo:view.trailingAnchor),
+            processingOverlay.topAnchor.constraint(equalTo:view.topAnchor),
+            processingOverlay.bottomAnchor.constraint(equalTo:view.bottomAnchor),
+            capturedImageView.leadingAnchor.constraint(equalTo:processingOverlay.leadingAnchor),
+            capturedImageView.trailingAnchor.constraint(equalTo:processingOverlay.trailingAnchor),
+            capturedImageView.topAnchor.constraint(equalTo:processingOverlay.topAnchor),
+            capturedImageView.bottomAnchor.constraint(equalTo:processingOverlay.bottomAnchor),
+            dimView.leadingAnchor.constraint(equalTo:processingOverlay.leadingAnchor),
+            dimView.trailingAnchor.constraint(equalTo:processingOverlay.trailingAnchor),
+            dimView.topAnchor.constraint(equalTo:processingOverlay.topAnchor),
+            dimView.bottomAnchor.constraint(equalTo:processingOverlay.bottomAnchor),
+            processingCard.centerXAnchor.constraint(equalTo:processingOverlay.centerXAnchor),
+            processingCard.centerYAnchor.constraint(equalTo:processingOverlay.centerYAnchor),
+            processingCard.leadingAnchor.constraint(greaterThanOrEqualTo:processingOverlay.leadingAnchor, constant:36),
+            processingCard.trailingAnchor.constraint(lessThanOrEqualTo:processingOverlay.trailingAnchor, constant:-36),
+            processingCard.widthAnchor.constraint(lessThanOrEqualToConstant:330),
+            processingIcon.topAnchor.constraint(equalTo:processingCard.contentView.topAnchor, constant:22),
+            processingIcon.centerXAnchor.constraint(equalTo:processingCard.contentView.centerXAnchor),
+            processingIcon.widthAnchor.constraint(equalToConstant:38),
+            processingIcon.heightAnchor.constraint(equalToConstant:38),
+            processingTitleLabel.topAnchor.constraint(equalTo:processingIcon.bottomAnchor, constant:12),
+            processingTitleLabel.leadingAnchor.constraint(equalTo:processingCard.contentView.leadingAnchor, constant:24),
+            processingTitleLabel.trailingAnchor.constraint(equalTo:processingCard.contentView.trailingAnchor, constant:-24),
+            processingDetailLabel.topAnchor.constraint(equalTo:processingTitleLabel.bottomAnchor, constant:7),
+            processingDetailLabel.leadingAnchor.constraint(equalTo:processingCard.contentView.leadingAnchor, constant:22),
+            processingDetailLabel.trailingAnchor.constraint(equalTo:processingCard.contentView.trailingAnchor, constant:-22),
+            processingIndicator.topAnchor.constraint(equalTo:processingDetailLabel.bottomAnchor, constant:14),
+            processingIndicator.centerXAnchor.constraint(equalTo:processingCard.contentView.centerXAnchor),
+            processingIndicator.bottomAnchor.constraint(equalTo:processingCard.contentView.bottomAnchor, constant:-20)
+        ])
+
+        view.bringSubviewToFront(processingOverlay)
         
         
+    }
+
+
+    private func showCapturedTransition(
+        image:UIImage,
+        pageNumber:Int
+    ) {
+        processingMessageWorkItems.forEach { $0.cancel() }
+        processingMessageWorkItems.removeAll()
+
+        capturedImageView.image = image
+        processingIcon.image = UIImage(systemName:"checkmark.circle.fill")
+        processingIcon.tintColor = .systemGreen
+        processingTitleLabel.text = isMultiPage
+            ? L10n.format("第 %@ 页已拍摄", String(pageNumber))
+            : L10n.text("拍摄完成")
+        processingDetailLabel.text = L10n.text("照片已保存，正在准备处理")
+        processingIndicator.stopAnimating()
+        processingOverlay.isHidden = false
+
+        UIView.animate(withDuration:0.16) {
+            self.processingOverlay.alpha = 1
+        }
+
+        scheduleProcessingMessage(
+            after:0.38,
+            title:"正在校正纸张…",
+            detail:"正在拉正页面并保留完整边缘"
+        )
+        scheduleProcessingMessage(
+            after:1.25,
+            title:"正在检查文字清晰度…",
+            detail:"正在选择更清晰且安全的扫描结果"
+        )
+        scheduleProcessingMessage(
+            after:2.75,
+            title:"正在生成扫描预览…",
+            detail:"复杂页面可能需要多一点时间"
+        )
+    }
+
+
+    private func scheduleProcessingMessage(
+        after delay:TimeInterval,
+        title:String,
+        detail:String
+    ) {
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self,
+                  !self.processingOverlay.isHidden else { return }
+            self.processingIcon.image = UIImage(systemName:"doc.viewfinder")
+            self.processingIcon.tintColor = .white
+            self.processingTitleLabel.text = L10n.text(title)
+            self.processingDetailLabel.text = L10n.text(detail)
+            self.processingIndicator.startAnimating()
+        }
+        processingMessageWorkItems.append(workItem)
+        DispatchQueue.main.asyncAfter(
+            deadline:.now() + delay,
+            execute:workItem
+        )
+    }
+
+
+    private func hideCapturedTransition(
+        completion:(()->Void)? = nil
+    ) {
+        processingMessageWorkItems.forEach { $0.cancel() }
+        processingMessageWorkItems.removeAll()
+        UIView.animate(
+            withDuration:0.20,
+            animations:{ self.processingOverlay.alpha = 0 },
+            completion:{ _ in
+                self.processingIndicator.stopAnimating()
+                self.processingOverlay.isHidden = true
+                self.capturedImageView.image = nil
+                completion?()
+            }
+        )
     }
     
     
@@ -1580,14 +1665,28 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
         let average = averagedCorners(recentDocumentCorners)
         let stabilityWindow = recentDocumentCorners.suffix(5)
+        let averageJitter = stabilityWindow.isEmpty
+            ? CGFloat.greatestFiniteMagnitude
+            : stabilityWindow.reduce(CGFloat.zero) {
+                $0 + maximumCornerDistance($1, average)
+            } / CGFloat(stabilityWindow.count)
         let isStable = stabilityWindow.count == 5
             && stabilityWindow.allSatisfy {
                 maximumCornerDistance($0, average) <= 0.018
             }
             && quadrilateralArea(average) >= 0.12
+        let recentFrameCount = recentDocumentCorners.count
+        let stableFrameCount = stabilityWindow.count
 
         DispatchQueue.main.async {
             self.stableDocumentCorners = isStable ? average : nil
+            self.stableDocumentStability = isStable
+                ? CaptureCornerStability(
+                    recentFrameCount:recentFrameCount,
+                    stableFrameCount:stableFrameCount,
+                    averageCornerJitter:averageJitter
+                )
+                : nil
             self.updateGuidance(
                 corners:average,
                 isStable:isStable,
@@ -1611,6 +1710,7 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
         DispatchQueue.main.async {
             self.stableDocumentCorners = nil
+            self.stableDocumentStability = nil
             self.boxLayer.path = nil
             self.updateGuidance(
                 corners:candidateCorners,
@@ -1702,7 +1802,7 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
         let message:String
 
         if brightness < 48 {
-            message = flashOn
+            message = flashMode != .off
                 ? L10n.text("光线较暗，闪光灯会辅助拍摄")
                 : L10n.text("光线较暗，建议开启闪光灯")
         }
@@ -1874,7 +1974,9 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
     private func resetDocumentTracking(){
         stableDocumentCorners = nil
+        stableDocumentStability = nil
         captureReferenceCorners = nil
+        captureReferenceStability = nil
         boxLayer.path = nil
         lastGuidanceMessage = ""
         updateGuidance(
@@ -1985,6 +2087,10 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
         stableDocumentCorners
 
 
+        captureReferenceStability =
+        stableDocumentStability
+
+
         RecognitionLogStore.shared.add(
             category:"拍摄",
             message:captureReferenceCorners == nil
@@ -1993,13 +2099,13 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
             details:L10n.format(
                 "模式 %@，闪光灯 %@，对焦曝光 %@，方向 %@，拍摄旋转 %d°",
                 L10n.text(isMultiPage ? "多页" : "单页"),
-                L10n.text(flashOn ? "开启" : "关闭"),
+                flashMode.title,
                 L10n.text(
                     focusExposureTimedOut
                         ? "等待 250 毫秒后拍摄"
                         : "已稳定"
                 ),
-                captureOrientationMode.title,
+                L10n.text("自动"),
                 Int(currentCaptureRotationAngle.rounded())
             )
         )
@@ -2013,10 +2119,7 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
             .quality
 
 
-        settings.flashMode =
-        flashOn
-        ? .on
-        : .off
+        settings.flashMode = flashMode.captureMode
 
 
         if let connection = photoOutput.connection(
@@ -2098,6 +2201,16 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
             return
             
         }
+
+
+        recordFlashResult(for:photo)
+
+        DispatchQueue.main.async {
+            self.showCapturedTransition(
+                image:image,
+                pageNumber:self.scannedPages.count + 1
+            )
+        }
         
         
         if isMultiPage {
@@ -2110,7 +2223,9 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
             ScanProcessor.shared.process(
                 image:image,
-                preferredCorners:captureReferenceCorners
+                preferredCorners:captureReferenceCorners,
+                preferredCornerStability:captureReferenceStability,
+                pageNumber:scannedPages.count + 1
             ){ processedPages in
 
 
@@ -2136,9 +2251,9 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
                     self.updateMultiPageUI()
 
 
-                    self.setCaptureEnabled(
-                        true
-                    )
+                    self.hideCapturedTransition {
+                        self.setCaptureEnabled(true)
+                    }
 
 
                     print(
@@ -2164,7 +2279,9 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
             
             ScanProcessor.shared.process(
                 image:image,
-                preferredCorners:captureReferenceCorners
+                preferredCorners:captureReferenceCorners,
+                preferredCornerStability:captureReferenceStability,
+                pageNumber:1
             ){ processedPages in
                 
                 
@@ -2187,12 +2304,10 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
                     self.resetDocumentTracking()
                     
                     
-                    self.setCaptureEnabled(
-                        true
-                    )
-
-
                     guard let delegate = self.delegate else {
+                        self.hideCapturedTransition {
+                            self.setCaptureEnabled(true)
+                        }
                         for page in processedPages {
                             page.removeTemporaryFiles()
                         }
@@ -2202,6 +2317,22 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
                     self.didHandOffPages = true
 
+                    // Keep the captured-photo transition fully visible until
+                    // SwiftUI replaces the camera with ScanPreviewView. Hiding
+                    // it first briefly exposes the live camera again.
+                    self.processingMessageWorkItems.forEach { $0.cancel() }
+                    self.processingMessageWorkItems.removeAll()
+                    self.processingIcon.image = UIImage(
+                        systemName:"doc.text.magnifyingglass"
+                    )
+                    self.processingIcon.tintColor = .white
+                    self.processingTitleLabel.text = L10n.text(
+                        "正在打开扫描预览…"
+                    )
+                    self.processingDetailLabel.text = L10n.text(
+                        "扫描结果已准备完成"
+                    )
+                    self.processingIndicator.startAnimating()
 
                     delegate.scannerDidFinish(
                         pages:processedPages
@@ -2217,6 +2348,46 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
         }
         
         
+    }
+
+
+    private func recordFlashResult(
+        for photo:AVCapturePhoto
+    ){
+        let capturedFlashMode = flashMode
+        let didFire:Bool?
+
+        if let exif = photo.metadata[
+            kCGImagePropertyExifDictionary as String
+        ] as? [String:Any],
+           let flashValue = exif[
+            kCGImagePropertyExifFlash as String
+           ] as? NSNumber {
+            didFire = flashValue.intValue & 1 == 1
+        }
+        else {
+            didFire = nil
+        }
+
+        let details = L10n.format(
+            "模式 %@，实际触发 %@",
+            capturedFlashMode.title,
+            didFire.map {
+                L10n.text($0 ? "是" : "否")
+            } ?? L10n.text("未知")
+        )
+
+        RecognitionLogStore.shared.add(
+            category:"闪光灯",
+            message:"拍摄闪光灯结果",
+            details:details
+        )
+
+        DiagnosticsCollector.shared.recordEvent(
+            category:"闪光灯",
+            message:"拍摄闪光灯结果",
+            details:details
+        )
     }
     // MARK: Mode
 
@@ -2365,8 +2536,8 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
         modeCanChange ? 1 : 0.6
 
 
-        orientationButton.isEnabled = enabled
-        orientationButton.alpha = enabled ? 1 : 0.5
+        flashButton.isEnabled = enabled
+        flashButton.alpha = enabled ? 1 : 0.5
 
 
         if enabled {
@@ -2397,82 +2568,18 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
     @objc
     private func toggleFlash(){
-        
-        
-        flashOn.toggle()
-        
-        
+        flashMode = flashMode.next
         updateFlashIcon()
-        
-        
     }
+
     private func updateFlashIcon(){
-        
-        
         flashButton.setImage(
-            
-            UIImage(
-                systemName:
-                    flashOn
-                ? "bolt.fill"
-                : "bolt.slash"
-            ),
-            
-            for:.normal
-            
-        )
-        
-        
-    }
-
-
-    private func updateOrientationMenu(){
-        let actions = CaptureOrientationMode.allCases.map { mode in
-            UIAction(
-                title:mode.title,
-                image:UIImage(systemName:mode.symbolName),
-                state:mode == captureOrientationMode ? .on : .off
-            ) { [weak self] _ in
-                self?.selectCaptureOrientation(mode)
-            }
-        }
-
-        orientationButton.menu = UIMenu(
-            title:L10n.text("拍摄方向"),
-            children:actions
-        )
-
-        orientationButton.setImage(
-            UIImage(systemName:captureOrientationMode.symbolName),
+            UIImage(systemName:flashMode.symbolName),
             for:.normal
         )
-        orientationButton.setTitle(
-            " \(captureOrientationMode.shortTitle)",
-            for:.normal
-        )
-        orientationButton.accessibilityLabel =
-            L10n.format(
-                "拍摄方向：%@",
-                captureOrientationMode.title
-            )
-    }
-
-
-    private func selectCaptureOrientation(
-        _ mode:CaptureOrientationMode
-    ){
-        guard captureOrientationMode != mode else {
-            return
-        }
-
-        captureOrientationMode = mode
-        updateOrientationMenu()
-        updateCameraOrientation()
-
-        RecognitionLogStore.shared.add(
-            category:"拍摄方向",
-            message:"已切换拍摄方向",
-            details:mode.title
+        flashButton.accessibilityLabel = L10n.format(
+            "闪光灯：%@",
+            flashMode.title
         )
     }
     
