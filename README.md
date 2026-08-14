@@ -1,242 +1,225 @@
 # AoiScan
 
 <p align="center">
-  <img src="icon.png" width="120" alt="AoiScan Icon">
+  <img src="icon.png" width="120" alt="AoiScan app icon">
 </p>
 
 <p align="center">
-  <b>A privacy-focused offline document scanner for iOS.</b>
+  <b>A privacy-focused, offline-first document scanner for iOS.</b>
 </p>
 
-AoiScan is an open-source iOS document scanning application designed around **privacy, simplicity, and local processing**.
+AoiScan is an open-source iOS document scanner built around **privacy, local processing, and practical image quality**. It combines Apple-native camera, computer-vision, OCR, and document frameworks to capture, improve, recognize, organize, and export documents without requiring a cloud processing service.
 
-Unlike cloud-dependent scanning solutions, AoiScan processes documents directly on the device whenever possible, helping users keep their documents private and secure.
-
-The goal of AoiScan is to provide a lightweight but powerful document scanning experience using Apple’s native technologies and modern computer vision techniques.
+> AoiScan is under active development and limited TestFlight beta testing. Image-quality algorithms and thresholds may continue to change as more real-device diagnostics are collected.
 
 ---
 
-## ✨ Features
+## Highlights
 
-### Document Scanning
+### Capture and editing
 
-- 📷 Capture documents using the iPhone camera
-- 📑 Single-page and multi-page scanning
-- 📄 Automatic document detection
-- 📐 Perspective correction
-- ✂️ Manual crop adjustment
-- 🔄 Image rotation
-- 🔍 Image zoom and position adjustment
-- 🖼️ Original, smart, and black-and-white document filters
-- 📤 Export and share scanned documents as PDF
+- Single-page and multi-page camera capture
+- Automatic document detection and perspective correction
+- Manual crop adjustment, rotation, zoom, and positioning
+- Original, Smart, and black-and-white document filters
+- Immediate post-shutter preview
+- Local document storage and renaming
 
-### Text Recognition
+### Smart image processing
 
-- 🔎 On-device OCR text recognition
-- ✏️ Basic recognized-text editing
-- 📋 Copy recognized text
-- 📤 Share recognized text with other applications
-- 📚 Page navigation for multi-page OCR
-- 🔍 Local document search using recognized text
+- Document-aware enhancement for lighting, background, color retention, and regional sharpness
+- OCR-assisted quality evaluation for selecting useful enhancements
+- Fast paths for normal and dense-text pages
+- Visual preflight checks that can stop expensive OCR comparisons when a candidate is unlikely to improve the page
+- Conservative recovery processing for pages with strong quality problems
+- Small-text and regional-clarity risk analysis
 
-### Privacy & Security
+### OCR and search
 
-- 🔒 Offline-first architecture
-- 🛡️ No automatic cloud upload
-- 📱 Local document and OCR processing
-- 🔐 Scanned documents stay on the device
-- 📜 An in-app privacy statement explains how documents and diagnostic data are handled
-- 🚫 Diagnostic logs do not contain scanned images or recognized document text
+- On-device text recognition using Apple Vision
+- Editable recognized text
+- Copy and share recognized text
+- Multi-page OCR navigation
+- Local full-text document search
+- Separate OCR profiles for user text, search indexing, quality evaluation, and recovery comparison
 
-### Document Management
+### Export
 
-- Local document storage
-- PDF document organization
-- Document renaming
-- Local full-text search
-- Privacy-safe diagnostic logs
-- Diagnostic log review and export
+- PDF generation and sharing
+- Microsoft Word-compatible DOCX export
+- Sharing through the standard iOS share sheet
 
----
+### Privacy and diagnostics
 
-## 🆕 Latest Updates — August 10, 2026
-
-### Privacy Statement
-
-AoiScan now includes an in-app privacy statement explaining how scanned documents, recognized text, and diagnostic information are handled.
-
-AoiScan is designed for offline use. Scanned documents are processed locally and are not automatically uploaded to a cloud service.
-
-### Diagnostic Logs
-
-Users can now review and export diagnostic logs to help investigate scanning, document detection, and recognition issues.
-
-The diagnostic logs are designed not to include:
-
-- Scanned document images
-- Recognized document text
-- Document contents
-- User file names
-
-### TestFlight Beta Testing
-
-AoiScan is currently undergoing beta testing through Apple TestFlight.
-
-If you would like to participate in the TestFlight beta and provide feedback, please contact the maintainer by opening a GitHub Issue.
-
-TestFlight access may be limited while the application is under active development.
+- Offline-first architecture
+- No automatic upload of scanned documents
+- Local document, enhancement, OCR, and search processing
+- In-app privacy information
+- Reviewable and exportable diagnostic logs
+- Diagnostic logs are designed not to contain scanned images, recognized document text, document contents, or user file names
 
 ---
 
-## 📱 Screenshots
+## Latest development progress — August 14, 2026
 
-Coming soon.
+### Faster Smart enhancement convergence
+
+The Smart enhancement pipeline now avoids unnecessary recovery and repeated precision OCR for ordinary pages. Dense-text pages can keep an already measured baseline Smart result, while strong-problem candidates pass a lower-cost visual preflight before an additional OCR comparison is allowed to run.
+
+The goal is to preserve useful document quality while reducing avoidable processing after capture.
+
+### Capture buffer and best-frame selection
+
+A first-stage capture buffer now samples a small number of recent camera frames before the shutter is pressed. At capture time, the pipeline can evaluate:
+
+- Top, middle, and bottom sharpness
+- Overall sharpness and regional balance
+- Exposure quality
+- Document coverage
+- Corner stability
+- Resolution eligibility
+
+The formal high-resolution photo remains the default. A buffered frame is eligible only when it meets conservative resolution, stability, exposure, and no-regional-regression requirements and provides a meaningful quality improvement.
+
+Low-resolution or incomplete buffer data is rejected early, so it cannot reduce final image quality or silently supply unsafe crop geometry.
+
+### Color-temperature diagnostics
+
+AoiScan can classify captured lighting as neutral, warm, cool, or uncertain and record confidence and color measurements in privacy-safe diagnostics.
+
+This phase is **diagnostic only**: it does not automatically apply white-balance correction or alter the scanned image.
+
+### Frame-fusion feasibility diagnostics
+
+The project can evaluate whether buffered frames contain stable, complementary regional detail that may justify future multi-frame fusion work. This is currently a feasibility and diagnostics feature, not a production image-fusion promise.
+
+### Verification
+
+The latest capture-buffer and Smart-pipeline work has been compiled and linked successfully against the iPhoneOS SDK. Real-device testing and threshold tuning remain ongoing.
 
 ---
 
-## 🛠 Technologies
+## Technology
 
-AoiScan is built with Apple’s native frameworks and modern iOS technologies.
+AoiScan currently uses:
 
-### Current Technologies
-
-- Swift
-- SwiftUI
+- Swift and SwiftUI
 - AVFoundation
-- Vision Framework
+- Vision
 - Core Image
 - PDFKit
 - Core Data
+- UIKit where required for camera, imaging, and export workflows
 
-### Technologies Under Evaluation
-
-- OpenCV for advanced document image processing
-- Core ML for local AI enhancement
-- Advanced shadow removal
-- Intelligent document understanding
+Technologies being evaluated for future work include Core ML and OpenCV, where they can add meaningful on-device capability without weakening the privacy model.
 
 ---
 
-## 🚧 Development Status
+## Development status
 
-AoiScan is currently under active development and TestFlight beta testing.
+AoiScan is actively developed and tested through a limited TestFlight beta.
 
-Current development priorities include:
+Current priorities include:
 
-- Improving document edge-detection stability
-- Supporting documents with different colors and backgrounds
-- Improving scanning performance and image quality
-- Optimizing local OCR performance
-- Improving multi-page document workflows
-- Expanding privacy-safe diagnostic information
-- Building a simple and intuitive scanning experience
+- Validating capture-buffer behavior across more iPhone models
+- Improving document-edge and crop stability
+- Tuning Smart enhancement speed and quality thresholds
+- Improving colored-paper and mixed-light handling
+- Expanding privacy-safe diagnostics
+- Optimizing OCR and multi-page workflows
+- Evaluating whether regional multi-frame fusion is worthwhile
 
 ---
 
-## 🗺 Roadmap
+## Roadmap
 
 ### Version 1.0
 
-- [x] Single-page document capture
-- [x] Multi-page document capture
+- [x] Single-page and multi-page document capture
 - [x] Automatic document detection
-- [x] Perspective correction
-- [x] Manual crop adjustment
-- [x] Image filters
-- [x] PDF generation
-- [x] Local document storage
-- [x] OCR text recognition
+- [x] Perspective correction and manual crop adjustment
+- [x] Original, Smart, and black-and-white filters
+- [x] Local document storage and renaming
+- [x] PDF generation and sharing
+- [x] DOCX export
+- [x] On-device OCR and editable recognized text
 - [x] Local OCR search
-- [x] Diagnostic logs
-- [x] In-app privacy statement
-- [x] TestFlight beta testing
-- [ ] Improved detection for colored documents
+- [x] Privacy-safe diagnostic logs
+- [x] In-app privacy information
+- [x] Limited TestFlight beta testing
+- [x] Smart enhancement quality routing and visual early-stop checks
+- [x] Capture-buffer and conservative best-frame selection foundation
+- [x] Color-temperature diagnostics
+- [ ] Broader real-device validation and threshold tuning
+- [ ] Additional colored-document detection improvements
 - [ ] Additional scanning stability improvements
-- [ ] Expanded diagnostic information
 
-### Future Development
+### Future development
 
-- [ ] Professional document filters
-- [ ] Advanced shadow removal
-- [ ] Advanced noise reduction
-- [ ] PDF merge and split
-- [ ] PDF page management
-- [ ] Local AI document analysis
-- [ ] Smart document organization
+- [ ] Advanced shadow removal and noise reduction
+- [ ] PDF merge, split, and page management
+- [ ] Local AI document analysis and organization
 - [ ] Improved book-page detection
-- [ ] Optional automatic separation of left and right book pages
+- [ ] Optional left/right book-page separation
+- [ ] Regional multi-frame fusion, if diagnostics demonstrate a reliable benefit
 
 ---
 
-## 🧠 Vision
+## TestFlight and feedback
 
-Many document scanner applications rely on cloud services for advanced processing.
+AoiScan is available to a limited number of TestFlight beta testers. To ask about testing access or report a problem, open a GitHub Issue.
 
-AoiScan explores a different approach:
+Feedback is especially useful for:
 
-> Powerful document scanning while keeping documents private and processed locally.
-
-The project aims to combine Apple’s ecosystem, computer vision algorithms, and local AI technologies to create a secure and practical document scanning experience.
-
----
-
-## 🤝 Contributing
-
-Contributions, bug reports, testing feedback, and suggestions are welcome.
-
-When reporting an issue, please include:
-
-- iOS version
-- Device model
-- A description of the document and environment
-- Steps to reproduce the problem
-- Screenshots when appropriate
-- Exported diagnostic logs when available
-
-Please make sure screenshots do not contain private or sensitive document information.
-
----
-
-## 🧪 TestFlight
-
-AoiScan is currently available to a limited number of TestFlight beta testers.
-
-If you are interested in testing AoiScan, please open a GitHub Issue to contact the maintainer.
-
-Feedback about the following areas is especially helpful:
-
-- Document detection accuracy
-- Colored-paper detection
-- Multi-page scanning
-- Image filters
+- Device model and iOS version
+- Document type, paper color, and lighting conditions
+- Edge-detection and crop accuracy
+- Smart-filter quality and processing time
 - OCR accuracy
+- Multi-page workflows
 - Performance and stability
-- User interface and workflow
+- Exported diagnostic logs, when available
+
+Do not attach screenshots that contain private or sensitive document information.
 
 ---
 
-## 🔧 Development
+## Development
 
 ### Requirements
 
 - macOS
 - Xcode
 - iOS 17 or later
+- A physical iOS device is recommended for camera and performance testing
 
-### Clone the Repository
+### Clone and open
 
 ```bash
 git clone https://github.com/aoineko00-droid/AoiScan.git
+cd AoiScan
+open AoiScan.xcodeproj
 ```
 
-Open the project in Xcode, select an iOS device, and build the application.
+Select a compatible iOS device in Xcode, then build and run the application.
 
 ---
 
-## 🔐 Privacy
+## Privacy
 
-AoiScan is designed as an offline-first application.
+AoiScan is designed as an offline-first application. Scanned documents and recognized text are processed locally, and the app does not automatically upload document contents to an external processing service.
 
-Documents and recognized text are processed locally whenever possible. AoiScan does not automatically upload scanned documents to an external server.
+Diagnostics are intended to describe pipeline decisions, timing, quality measurements, and failure reasons without embedding scanned images or recognized document text.
 
-Users
+---
+
+## Contributing
+
+Bug reports, testing feedback, suggestions, and focused code contributions are welcome. When opening an issue, include reproducible steps and relevant non-sensitive diagnostics whenever possible.
+
+---
+
+## License
+
+See [LICENSE](LICENSE) for license information.
+
