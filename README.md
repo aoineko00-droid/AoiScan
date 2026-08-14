@@ -60,7 +60,7 @@ AoiScan is an open-source iOS document scanner built around **privacy, local pro
 
 ---
 
-## Latest development progress — August 14, 2026
+## Latest development progress — August 14, 2026#
 
 ### Faster Smart enhancement convergence
 
