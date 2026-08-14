@@ -1,0 +1,11 @@
+--- AoiScan-instant-capture-feedback-work/AoiScan/OCRQualityModels.swift	2026-08-13 10:56:52
++++ AoiScan-speed-convergence-color-diagnostics-work/AoiScan/OCRQualityModels.swift	2026-08-13 16:46:05
+@@ -81,6 +81,8 @@
+     let executedCandidateCount:Int
+     let skippedCandidateCount:Int
+     let documentQualityRoute:DocumentQualityRoute
++    let preflightSkippedOCRCount:Int
++    let estimatedMillisecondsSaved:Int
+ }
+ 
+ 

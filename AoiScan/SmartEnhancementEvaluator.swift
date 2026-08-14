@@ -167,7 +167,16 @@ struct SmartEnhancementEvaluator {
                 && enhanced.visual.regionalClarityBalance
                     >= original.visual.regionalClarityBalance + 0.015
         case .lighting, .background:
-            return enhanced.visual.illuminationGradient
+            let minimumShadowReduction = max(
+                0.012,
+                original.visual.shadowSeverity * 0.12
+            )
+            let shadowImproved = original.visual.shadowSeverity >= 0.080
+                && enhanced.visual.shadowSeverity
+                    <= original.visual.shadowSeverity
+                        - minimumShadowReduction
+            return shadowImproved
+                || enhanced.visual.illuminationGradient
                     <= original.visual.illuminationGradient - 0.006
                 || enhanced.backgroundUniformity
                     >= original.backgroundUniformity + 0.012

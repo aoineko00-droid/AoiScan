@@ -1,0 +1,142 @@
+--- AoiScan-instant-capture-feedback-work/AoiScan/SmartEnhancementPipeline.swift	2026-08-13 10:56:52
++++ AoiScan-speed-convergence-color-diagnostics-work/AoiScan/SmartEnhancementPipeline.swift	2026-08-13 17:08:27
+@@ -129,6 +129,8 @@
+             colorRetention:.identity,
+             documentQuality:originalDocumentQuality,
+             reusedBaselineOCR:reusedBaselineOCR,
++            preflight:nil,
++            secondOCRPerformed:false,
+             selected:false
+         )
+         let baselineDecision = SmartEnhancementEvaluator()
+@@ -158,6 +160,24 @@
+             for:documentRoute
+         )
+ 
++        // Dense pages are exactly where a second accurate Vision OCR pass can
++        // cost 10+ seconds. Current field logs show no reliable replacement
++        // benefit on these pages, so keep their already measured baseline.
++        if originalQuality.recognizedCharacterCount >= 700 {
++            finishExperiment(
++                selected:baselineSelection,
++                originalQuality:originalQuality,
++                summaries:[baselineSummary],
++                qualityRoute:route,
++                documentQualityRoute:documentRoute,
++                earlyStopReason:"密集文字页面启用快速生产路径，跳过重复OCR",
++                startedAt:startedAt,
++                pageNumber:pageNumber,
++                completion:completion
++            )
++            return
++        }
++
+         guard !candidates.isEmpty else {
+             let reason = documentRoute.reason
+             finishExperiment(
+@@ -242,8 +262,53 @@
+         let colorRetention = ColorRetentionAnalyzer.analyze(
+             original:rgbSource,
+             candidate:candidateImage
++        )
++        let preflight = EnhancementPreflightAnalyzer.analyze(
++            candidate:candidateImage,
++            blocks:originalOCR.blocks,
++            route:documentQualityRoute,
++            baselineQuality:originalDocumentQuality,
++            colorRetention:colorRetention,
++            recognizedCharacterCount:
++                originalQuality.recognizedCharacterCount
+         )
+ 
++        guard preflight.shouldRunOCR else {
++            var updatedSummaries = summaries
++            updatedSummaries.append(
++                EnhancementTrialSummary(
++                    variant:candidate.variant,
++                    parameters:candidate.parameters,
++                    weightedConfidence:nil,
++                    recognizedCharacterCount:0,
++                    characterStability:0,
++                    textCoverage:0,
++                    processingMilliseconds:milliseconds(
++                        since:candidateStartedAt
++                    ),
++                    evaluatorAccepted:false,
++                    colorRetention:colorRetention,
++                    documentQuality:nil,
++                    reusedBaselineOCR:false,
++                    preflight:preflight,
++                    secondOCRPerformed:false,
++                    selected:false
++                )
++            )
++            finishExperiment(
++                selected:selected,
++                originalQuality:originalQuality,
++                summaries:updatedSummaries,
++                qualityRoute:qualityRoute,
++                documentQualityRoute:documentQualityRoute,
++                earlyStopReason:preflight.reason,
++                startedAt:startedAt,
++                pageNumber:pageNumber,
++                completion:completion
++            )
++            return
++        }
++
+         LocalTextRecognizer.recognize(
+             image:downscaledForEvaluation(candidateImage),
+             pageNumber:pageNumber,
+@@ -270,6 +335,8 @@
+                         colorRetention:colorRetention,
+                         documentQuality:nil,
+                         reusedBaselineOCR:false,
++                        preflight:preflight,
++                        secondOCRPerformed:true,
+                         selected:false
+                     )
+                 )
+@@ -347,6 +414,8 @@
+                         colorRetention:colorRetention,
+                         documentQuality:candidateDocumentQuality,
+                         reusedBaselineOCR:false,
++                        preflight:preflight,
++                        secondOCRPerformed:true,
+                         selected:false
+                     )
+                 )
+@@ -443,6 +512,18 @@
+         pageNumber:Int,
+         completion:@escaping (SmartEnhancementOutput)->Void
+     ) {
++        let densePageEstimatedSavings:Int
++        if earlyStopReason?.contains("密集文字页面") == true,
++           let recognizedCharacterCount = originalQuality?
++                .recognizedCharacterCount {
++            densePageEstimatedSavings = min(
++                max(900 + recognizedCharacterCount * 8, 1_200),
++                12_000
++            )
++        }
++        else {
++            densePageEstimatedSavings = 0
++        }
+         let output = SmartEnhancementOutput(
+             image:image,
+             ocrResult:ocrResult,
+@@ -460,7 +541,13 @@
+                     - executedCandidateCount,
+                 0
+             ),
+-            documentQualityRoute:documentQualityRoute
++            documentQualityRoute:documentQualityRoute,
++            preflightSkippedOCRCount:trialSummaries.filter {
++                $0.preflight != nil && !$0.secondOCRPerformed
++            }.count,
++            estimatedMillisecondsSaved:trialSummaries.compactMap {
++                $0.preflight?.estimatedMillisecondsSaved
++            }.reduce(0, +) + densePageEstimatedSavings
+         )
+ 
+         DispatchQueue.main.async {

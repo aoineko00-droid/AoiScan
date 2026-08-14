@@ -7,6 +7,7 @@ import UIKit
 import AVFoundation
 import Vision
 import ImageIO
+import CoreImage
 
 
 
@@ -71,9 +72,58 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
     )
 
 
+    private let previewSnapshotQueue =
+    DispatchQueue(
+        label:"aoi.scan.capture.preview",
+        qos:.userInitiated
+    )
+
+
+    private let captureBufferQueue = DispatchQueue(
+        label:"aoi.scan.capture.buffer",
+        qos:.userInitiated
+    )
+
+
+    private let captureFrameBuffer = CaptureFrameBuffer()
+
+
+    private var frozenCaptureBuffer:CaptureBufferSnapshot?
+
+
+    private let captureBufferSchedulingLock = NSLock()
+
+
+    private var captureBufferAnalysisPending = false
+
+
+    private let previewFrameLock = NSLock()
+
+
+    private var latestPreviewPixelBuffer:CVPixelBuffer?
+
+
+    private var latestPreviewOrientation:
+    CGImagePropertyOrientation = .right
+
+
+    private let previewCIContext = CIContext(
+        options:[.cacheIntermediates:false]
+    )
+
+
     // 只在 videoDetectionQueue 中读写。
     private var visionImageOrientation:
     CGImagePropertyOrientation = .right
+
+
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        frozenCaptureBuffer = nil
+        captureBufferQueue.async { [weak self] in
+            self?.captureFrameBuffer.handleMemoryPressure()
+        }
+    }
     
     
     
@@ -258,6 +308,16 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
 
     private var processingMessageWorkItems:[DispatchWorkItem] = []
+
+
+    // 以下状态只在主线程读写，用于防止较慢的预览帧覆盖正式照片。
+    private var activeCaptureFeedbackID:UUID?
+
+
+    private var didReceiveFormalPhoto = false
+
+
+    private var captureFeedbackStartedAt:CFTimeInterval?
     
     
     
@@ -376,6 +436,11 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
             isProcessingPhoto = false
             captureActivityIndicator.stopAnimating()
             discardScannedPages()
+        }
+
+        frozenCaptureBuffer = nil
+        captureBufferQueue.async { [weak self] in
+            self?.captureFrameBuffer.resumeAndClear()
         }
 
 
@@ -853,6 +918,10 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
             stableDocumentStability = nil
             captureReferenceCorners = nil
             captureReferenceStability = nil
+            frozenCaptureBuffer = nil
+            captureBufferQueue.async { [weak self] in
+                self?.captureFrameBuffer.resumeAndClear()
+            }
         }
 
         let visionOrientation = visionOrientation(
@@ -1462,10 +1531,16 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
     }
 
 
-    private func showCapturedTransition(
+    private func showImmediateCapturedTransition(
         image:UIImage,
-        pageNumber:Int
+        pageNumber:Int,
+        feedbackID:UUID
     ) {
+        guard activeCaptureFeedbackID == feedbackID,
+              !didReceiveFormalPhoto else {
+            return
+        }
+
         processingMessageWorkItems.forEach { $0.cancel() }
         processingMessageWorkItems.removeAll()
 
@@ -1474,20 +1549,57 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
         processingIcon.tintColor = .systemGreen
         processingTitleLabel.text = isMultiPage
             ? L10n.format("第 %@ 页已拍摄", String(pageNumber))
-            : L10n.text("拍摄完成")
-        processingDetailLabel.text = L10n.text("照片已保存，正在准备处理")
+            : L10n.text("已拍摄")
+        processingDetailLabel.text = L10n.text("正在获取高清原图…")
         processingIndicator.stopAnimating()
         processingOverlay.isHidden = false
 
-        UIView.animate(withDuration:0.16) {
+        UIView.animate(withDuration:0.08) {
             self.processingOverlay.alpha = 1
         }
 
-        scheduleProcessingMessage(
-            after:0.38,
-            title:"正在校正纸张…",
-            detail:"正在拉正页面并保留完整边缘"
+        if let startedAt = captureFeedbackStartedAt {
+            let milliseconds = Int(
+                ((CACurrentMediaTime() - startedAt) * 1_000).rounded()
+            )
+            RecognitionLogStore.shared.add(
+                category:"拍摄反馈",
+                message:"已显示即时预览",
+                details:"快门后 \(milliseconds) 毫秒，来源 相机预览帧"
+            )
+        }
+    }
+
+
+    private func showCapturedTransition(
+        image:UIImage,
+        pageNumber:Int
+    ) {
+        didReceiveFormalPhoto = true
+        processingMessageWorkItems.forEach { $0.cancel() }
+        processingMessageWorkItems.removeAll()
+
+        processingOverlay.isHidden = false
+        if processingOverlay.alpha == 0 {
+            processingOverlay.alpha = 1
+        }
+
+        UIView.transition(
+            with:capturedImageView,
+            duration:0.14,
+            options:[.transitionCrossDissolve, .allowAnimatedContent]
+        ) {
+            self.capturedImageView.image = image
+        }
+
+        processingIcon.image = UIImage(systemName:"doc.viewfinder")
+        processingIcon.tintColor = .white
+        processingTitleLabel.text = L10n.text("画面智能处理中…")
+        processingDetailLabel.text = L10n.text(
+            "正在校正纸张并优化文字清晰度"
         )
+        processingIndicator.startAnimating()
+
         scheduleProcessingMessage(
             after:1.25,
             title:"正在检查文字清晰度…",
@@ -1535,6 +1647,9 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
                 self.processingIndicator.stopAnimating()
                 self.processingOverlay.isHidden = true
                 self.capturedImageView.image = nil
+                self.activeCaptureFeedbackID = nil
+                self.didReceiveFormalPhoto = false
+                self.captureFeedbackStartedAt = nil
                 completion?()
             }
         )
@@ -1553,6 +1668,43 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ){
+        if !isProcessingPhoto,
+           let previewBuffer = CMSampleBufferGetImageBuffer(
+            sampleBuffer
+        ) {
+            previewFrameLock.lock()
+            latestPreviewPixelBuffer = previewBuffer
+            latestPreviewOrientation = visionImageOrientation
+            previewFrameLock.unlock()
+
+            let bufferedCorners = recentDocumentCorners.last
+            let referenceCorners = recentDocumentCorners.isEmpty
+                ? nil : averagedCorners(recentDocumentCorners)
+            let bufferedOrientation = visionImageOrientation
+
+            captureBufferSchedulingLock.lock()
+            let canScheduleBufferAnalysis = !captureBufferAnalysisPending
+            if canScheduleBufferAnalysis {
+                captureBufferAnalysisPending = true
+            }
+            captureBufferSchedulingLock.unlock()
+
+            if canScheduleBufferAnalysis {
+                captureBufferQueue.async { [weak self] in
+                    guard let self else { return }
+                    self.captureFrameBuffer.offer(
+                        pixelBuffer:previewBuffer,
+                        orientation:bufferedOrientation,
+                        corners:bufferedCorners,
+                        referenceCorners:referenceCorners
+                    )
+                    self.captureBufferSchedulingLock.lock()
+                    self.captureBufferAnalysisPending = false
+                    self.captureBufferSchedulingLock.unlock()
+                }
+            }
+        }
+
         let now = Date()
         guard now.timeIntervalSince(lastDetectionTime) >= 0.15 else {
             return
@@ -1984,6 +2136,10 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
             isStable:false,
             brightness:128
         )
+        frozenCaptureBuffer = nil
+        captureBufferQueue.async { [weak self] in
+            self?.captureFrameBuffer.resumeAndClear()
+        }
 
         videoDetectionQueue.async {
             self.recentDocumentCorners.removeAll()
@@ -2020,11 +2176,85 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
         )
 
 
+        beginImmediateCaptureFeedback()
+
+
         waitForFocusAndExposure(
             startedAt:CACurrentMediaTime()
         )
 
 
+    }
+
+
+    private func beginImmediateCaptureFeedback(){
+        let feedbackID = UUID()
+        activeCaptureFeedbackID = feedbackID
+        didReceiveFormalPhoto = false
+        captureFeedbackStartedAt = CACurrentMediaTime()
+        let pageNumber = scannedPages.count + 1
+
+        previewFrameLock.lock()
+        let pixelBuffer = latestPreviewPixelBuffer
+        let orientation = latestPreviewOrientation
+        previewFrameLock.unlock()
+
+        guard let pixelBuffer else {
+            RecognitionLogStore.shared.add(
+                level:"警告",
+                category:"拍摄反馈",
+                message:"没有可用于即时预览的相机帧"
+            )
+            return
+        }
+
+        previewSnapshotQueue.async { [weak self] in
+            guard let self,
+                  let image = self.makePreviewSnapshot(
+                    from:pixelBuffer,
+                    orientation:orientation
+                  ) else {
+                return
+            }
+
+            DispatchQueue.main.async {
+                self.showImmediateCapturedTransition(
+                    image:image,
+                    pageNumber:pageNumber,
+                    feedbackID:feedbackID
+                )
+            }
+        }
+    }
+
+
+    private func makePreviewSnapshot(
+        from pixelBuffer:CVPixelBuffer,
+        orientation:CGImagePropertyOrientation
+    )->UIImage? {
+        let orientedImage = CIImage(cvPixelBuffer:pixelBuffer)
+            .oriented(forExifOrientation:Int32(orientation.rawValue))
+        let maximumPreviewDimension:CGFloat = 1_600
+        let longestDimension = max(
+            orientedImage.extent.width,
+            orientedImage.extent.height
+        )
+        let scale = min(
+            1,
+            maximumPreviewDimension / max(longestDimension, 1)
+        )
+        let previewImage = orientedImage.transformed(
+            by:CGAffineTransform(scaleX:scale, y:scale)
+        )
+
+        guard let cgImage = previewCIContext.createCGImage(
+            previewImage,
+            from:previewImage.extent
+        ) else {
+            return nil
+        }
+
+        return UIImage(cgImage:cgImage)
     }
 
 
@@ -2089,6 +2319,9 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
         captureReferenceStability =
         stableDocumentStability
+
+
+        frozenCaptureBuffer = captureFrameBuffer.freeze()
 
 
         RecognitionLogStore.shared.add(
@@ -2168,7 +2401,13 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
             )
 
             DispatchQueue.main.async {
-                self.setCaptureEnabled(true)
+                self.frozenCaptureBuffer = nil
+                self.captureBufferQueue.async {
+                    self.captureFrameBuffer.resumeAndClear()
+                }
+                self.hideCapturedTransition {
+                    self.setCaptureEnabled(true)
+                }
             }
 
             return
@@ -2195,7 +2434,13 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
             )
 
             DispatchQueue.main.async {
-                self.setCaptureEnabled(true)
+                self.frozenCaptureBuffer = nil
+                self.captureBufferQueue.async {
+                    self.captureFrameBuffer.resumeAndClear()
+                }
+                self.hideCapturedTransition {
+                    self.setCaptureEnabled(true)
+                }
             }
             
             return
@@ -2205,9 +2450,51 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
         recordFlashResult(for:photo)
 
+        let pageNumber = isMultiPage ? scannedPages.count + 1 : 1
+        let snapshot = frozenCaptureBuffer ?? CaptureBufferSnapshot(
+            frames:[],
+            frozenAt:Date(),
+            diagnosticsOnly:true
+        )
+        let fusionFeasibility = FrameFusionFeasibilityAnalyzer.analyze(
+            snapshot:snapshot
+        )
+        FrameFusionDiagnostics.record(
+            result:fusionFeasibility,
+            pageNumber:pageNumber
+        )
+        let selection = BestFrameSelector.select(
+            formalPhoto:image,
+            formalCorners:captureReferenceCorners,
+            snapshot:snapshot
+        )
+        CaptureBufferDiagnostics.record(
+            result:selection,
+            pageNumber:pageNumber
+        )
+        let selectedImage = selection.image
+        let selectedCorners:ScanCorners?
+        let selectedCornerStability:CaptureCornerStability?
+        switch selection.source {
+        case .formalPhoto:
+            // A formal high-resolution photo may only carry the genuinely
+            // stable pre-capture corners. Ordinary buffered-frame corners are
+            // never allowed to influence its crop.
+            selectedCorners = captureReferenceCorners
+            selectedCornerStability = captureReferenceStability
+        case .bufferedFrame:
+            selectedCorners = selection.corners
+            selectedCornerStability = nil
+        }
+
+        frozenCaptureBuffer = nil
+        captureBufferQueue.async { [weak self] in
+            self?.captureFrameBuffer.releaseFrozenFrames()
+        }
+
         DispatchQueue.main.async {
             self.showCapturedTransition(
-                image:image,
+                image:selectedImage,
                 pageNumber:self.scannedPages.count + 1
             )
         }
@@ -2222,9 +2509,9 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
 
 
             ScanProcessor.shared.process(
-                image:image,
-                preferredCorners:captureReferenceCorners,
-                preferredCornerStability:captureReferenceStability,
+                image:selectedImage,
+                preferredCorners:selectedCorners,
+                preferredCornerStability:selectedCornerStability,
                 pageNumber:scannedPages.count + 1
             ){ processedPages in
 
@@ -2278,9 +2565,9 @@ AVCaptureVideoDataOutputSampleBufferDelegate {
             
             
             ScanProcessor.shared.process(
-                image:image,
-                preferredCorners:captureReferenceCorners,
-                preferredCornerStability:captureReferenceStability,
+                image:selectedImage,
+                preferredCorners:selectedCorners,
+                preferredCornerStability:selectedCornerStability,
                 pageNumber:1
             ){ processedPages in
                 

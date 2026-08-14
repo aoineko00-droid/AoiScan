@@ -1,0 +1,66 @@
+--- AoiScan-instant-capture-feedback-work/AoiScan/RecoveryCandidateEvaluator.swift	2026-08-13 10:56:52
++++ AoiScan-speed-convergence-color-diagnostics-work/AoiScan/RecoveryCandidateEvaluator.swift	2026-08-13 16:52:45
+@@ -22,14 +22,20 @@
+             return
+         }
+         let alternative = candidates
+-            .filter { $0.type != .current }
++            .filter {
++                $0.type != .current
++                    && hasStrongQuickEvidence(
++                        candidate:$0,
++                        baseline:baseline
++                    )
++            }
+             .max { $0.quickScore < $1.quickScore }
+ 
+         guard let alternative else {
+             deliver(
+                 selected:baseline,
+                 trials:quickTrials(candidates, selected:.current),
+-                reason:"没有通过快速筛选的恢复候选",
++                reason:"没有明确几何或清晰度收益，恢复OCR前早停",
+                 startedAt:startedAt,
+                 completion:completion
+             )
+@@ -191,6 +197,40 @@
+                 alternativeQuality
+             )
+         }
++    }
++
++    private static func hasStrongQuickEvidence(
++        candidate:RecoveryCandidate,
++        baseline:RecoveryCandidate
++    )->Bool {
++        let geometryGain = candidate.geometry.geometryScore
++            - baseline.geometry.geometryScore
++        let perspectiveReduction = baseline.geometry.perspectiveSeverity
++            - candidate.geometry.perspectiveSeverity
++        let edgeSafetyGain = candidate.geometry.edgeSafety
++            - baseline.geometry.edgeSafety
++        let balanceGain = candidate.sharpness.balance
++            - baseline.sharpness.balance
++        let averageSharpnessGain = relativeGain(
++            candidate.sharpness.average,
++            baseline.sharpness.average
++        )
++        let quickScoreGain = candidate.quickScore - baseline.quickScore
++
++        let fixesStrongPerspective =
++            baseline.geometry.perspectiveSeverity >= 0.18
++            && perspectiveReduction >= 0.025
++        let fixesUnsafeEdge = baseline.geometry.edgeSafety < 0.35
++            && edgeSafetyGain >= 0.12
++        let improvesSharpness = balanceGain >= 0.10
++            && averageSharpnessGain >= -0.02
++        let broadQuickGain = quickScoreGain >= 0.025
++            && geometryGain >= 0.012
++
++        return fixesStrongPerspective
++            || fixesUnsafeEdge
++            || improvesSharpness
++            || broadQuickGain
+     }
+ 
+     private static func recognize(

@@ -1,0 +1,54 @@
+--- AoiScan-instant-capture-feedback-work/AoiScan/DocumentQualityRouter.swift	2026-08-13 10:56:52
++++ AoiScan-speed-convergence-color-diagnostics-work/AoiScan/DocumentQualityRouter.swift	2026-08-13 16:51:41
+@@ -30,16 +30,18 @@
+         }
+ 
+         let visual = quality.visual
+-        let strongGradient = visual.illuminationGradient >= 0.055
+-        let strongShadow = visual.shadowSeverity >= 0.16
+-        let severeGradient = visual.illuminationGradient >= 0.080
++        // Normal lighting variation is diagnostic information, not a reason to
++        // spend another full OCR pass. Only route genuinely strong problems.
++        let strongGradient = visual.illuminationGradient >= 0.075
++        let strongShadow = visual.shadowSeverity >= 0.25
++        let severeGradient = visual.illuminationGradient >= 0.10
+         if severeGradient || (strongGradient && strongShadow) {
+             return DocumentQualityRoute(
+                 primaryIssue:.lighting,
+                 affectedRegion:.none,
+                 severity:min(
+                     max(
+-                        visual.illuminationGradient / 0.12,
++                        visual.illuminationGradient / 0.18,
+                         visual.shadowSeverity
+                     ),
+                     1
+@@ -48,21 +50,18 @@
+             )
+         }
+ 
+-        if let regional = regionalSharpnessRoute(
+-            visual:visual,
+-            blocks:blocks
+-        ) {
+-            return regional
+-        }
++        // Regional sharpness differences remain in diagnostics. They are not
++        // routed to production enhancement until a cheap pre-OCR metric can
++        // demonstrate a reliable gain.
+ 
+-        if visual.backgroundUniformity < 0.72,
+-           visual.shadowSeverity >= 0.20 {
++        if visual.backgroundUniformity < 0.58,
++           visual.shadowSeverity >= 0.32 {
+             return DocumentQualityRoute(
+                 primaryIssue:.background,
+                 affectedRegion:.none,
+                 severity:min(
+-                    (0.72 - visual.backgroundUniformity) * 2.2
+-                        + visual.shadowSeverity * 0.45,
++                    (0.58 - visual.backgroundUniformity) * 2.2
++                        + visual.shadowSeverity * 0.55,
+                     1
+                 ),
+                 reason:"背景均匀度与局部暗区同时达到背景恢复门槛"

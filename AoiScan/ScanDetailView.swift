@@ -1172,7 +1172,9 @@ struct ScanDetailView: View {
 
         SmartEnhancementPipeline.process(
             rgbImage:image,
-            pageNumber:index + 1
+            pageNumber:index + 1,
+            captureCorners:detectedCorners.indices.contains(index)
+                ? detectedCorners[index] : nil
         ) { output in
 
             guard detailEnhancementTokens[index] == token,

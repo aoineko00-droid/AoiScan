@@ -1,0 +1,17 @@
+--- AoiScan-instant-capture-feedback-work/AoiScan/ScanProcessor.swift	2026-08-13 10:56:52
++++ AoiScan-speed-convergence-color-diagnostics-work/AoiScan/ScanProcessor.swift	2026-08-13 16:56:57
+@@ -1587,6 +1587,14 @@
+                         )
+                     }
+                 ) { recoveryOutput in
++                    DispatchQueue.global(qos:.utility).async {
++                        ColorTemperatureDiagnostics.analyzeAndRecord(
++                            image:recoveryOutput.image,
++                            blocks:recoveryOutput.enhancementSeed?
++                                .ocrResult.blocks ?? [],
++                            pageNumber:pageNumber
++                        )
++                    }
+                     self.queue.async {
+                         autoreleasepool {
+                             let page = self.makeScanPage(

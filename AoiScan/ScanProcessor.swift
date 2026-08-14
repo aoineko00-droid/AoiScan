@@ -410,6 +410,12 @@ private struct SmallDocumentDetectionResult {
 }
 
 
+private struct StrictDocumentDetectionResult {
+    let rectangle:VNRectangleObservation
+    let selectionDetails:String
+}
+
+
 enum DocumentRectangleSelector {
     static func corners(
         from rectangle:VNRectangleObservation
@@ -439,18 +445,113 @@ enum DocumentRectangleSelector {
     }
 
 
+    /// Strict detection normally uses the existing weighted score. When the
+    /// best-scoring rectangle is fully enclosed by a substantially larger,
+    /// document-shaped candidate, promote the outer candidate. Dense tables
+    /// and text boxes often have cleaner edges than the page itself and would
+    /// otherwise win even though they are not the document boundary.
+    static func bestStrictSelection(
+        in observations:[VNRectangleObservation],
+        preferredCorners:ScanCorners?
+    )->(
+        rectangle:VNRectangleObservation?,
+        details:String
+    ) {
+        let plausible = observations.filter { isPlausible($0) }
+
+        guard let scoredBest = plausible.max(by:{
+            score($0, preferredCorners:preferredCorners)
+                < score($1, preferredCorners:preferredCorners)
+        }) else {
+            return (
+                nil,
+                L10n.format(
+                    "矩形候选 %d 个，严格几何检查后无可用候选",
+                    observations.count
+                )
+            )
+        }
+
+        var selected = scoredBest
+        var reason = preferredCorners == nil
+            ? "采用严格综合评分候选"
+            : "采用与拍摄前稳定定位最一致的候选"
+
+        let selectedArea = boxArea(selected)
+        let outerCandidate = plausible
+            .filter { isOuterPagePromotionCandidate($0) }
+            .filter { candidate in
+                let candidateArea = boxArea(candidate)
+                let intersection = candidate.boundingBox.intersection(
+                    selected.boundingBox
+                )
+                let enclosedArea = intersection.isNull
+                    ? 0
+                    : intersection.width * intersection.height
+                let enclosesSelected = enclosedArea
+                    / max(selectedArea, 0.0001) >= 0.88
+                let isSubstantiallyLarger = candidateArea
+                    >= selectedArea * 1.18
+
+                guard enclosesSelected, isSubstantiallyLarger else {
+                    return false
+                }
+
+                guard let preferredCorners else { return true }
+
+                let currentDistance = averageCornerDistance(
+                    corners(from:selected),
+                    preferredCorners
+                )
+                let candidateDistance = averageCornerDistance(
+                    corners(from:candidate),
+                    preferredCorners
+                )
+
+                // Stable preview corners are a scoring reference, not a direct
+                // crop. An outer candidate may replace the current choice only
+                // when it remains similarly consistent with that reference.
+                return candidateDistance <= currentDistance + 0.07
+            }
+            .max { boxArea($0) < boxArea($1) }
+
+        if let outerCandidate {
+            selected = outerCandidate
+            reason = "外围候选完整包围当前候选，已避免把文字框或表格框当作纸张"
+        }
+
+        let largestArea = plausible.map { rectangle in
+            rectangle.boundingBox.width * rectangle.boundingBox.height
+        }
+        .max() ?? 0
+        let selectedAreaPercent = boxArea(selected) * 100
+
+        return (
+            selected,
+            L10n.format(
+                "原始候选 %d 个，可用候选 %d 个，最大候选 %.1f%%，最终候选 %.1f%%；%@",
+                observations.count,
+                plausible.count,
+                largestArea * 100,
+                selectedAreaPercent,
+                reason
+            )
+        )
+    }
+
+
     static func bestSmallDocument(
         in observations:[VNRectangleObservation],
         textObservations:[VNRecognizedTextObservation]
     )->VNRectangleObservation? {
-        observations
+        let candidates = observations
             .filter {
                 isSmallDocumentPlausible(
                     $0,
                     textObservations:textObservations
                 )
             }
-            .max {
+        guard let scoredBest = candidates.max(by:{
                 smallDocumentScore(
                     $0,
                     textObservations:textObservations
@@ -459,7 +560,27 @@ enum DocumentRectangleSelector {
                     $1,
                     textObservations:textObservations
                 )
+            }) else {
+            return nil
+        }
+
+        let scoredArea = boxArea(scoredBest)
+        let outerCandidate = candidates
+            .filter { isOuterPagePromotionCandidate($0) }
+            .filter { candidate in
+                let intersection = candidate.boundingBox.intersection(
+                    scoredBest.boundingBox
+                )
+                let intersectionArea = intersection.isNull
+                    ? 0
+                    : intersection.width * intersection.height
+
+                return boxArea(candidate) >= scoredArea * 1.22
+                    && intersectionArea / max(scoredArea, 0.0001) >= 0.88
             }
+            .max { boxArea($0) < boxArea($1) }
+
+        return outerCandidate ?? scoredBest
     }
 
 
@@ -731,6 +852,37 @@ enum DocumentRectangleSelector {
         }
 
         return true
+    }
+
+
+    private static func isOuterPagePromotionCandidate(
+        _ rectangle:VNRectangleObservation
+    )->Bool {
+        let box = rectangle.boundingBox
+        let area = boxArea(rectangle)
+        let shorterSide = min(box.width, box.height)
+        let longerSide = max(box.width, box.height)
+        let aspect = shorterSide / max(longerSide, 0.0001)
+        let centerDistance = distance(
+            CGPoint(x:box.midX, y:box.midY),
+            CGPoint(x:0.5, y:0.5)
+        )
+        let shapeFill = quadrilateralArea(rectangle)
+            / max(area, 0.0001)
+
+        return area >= 0.10
+            && area <= 0.84
+            && aspect >= 0.40
+            && centerDistance <= 0.34
+            && shapeFill >= 0.58
+            && rectangle.confidence >= 0.62
+    }
+
+
+    private static func boxArea(
+        _ rectangle:VNRectangleObservation
+    )->CGFloat {
+        rectangle.boundingBox.width * rectangle.boundingBox.height
     }
 
 
@@ -1320,8 +1472,9 @@ class ScanProcessor {
                 }
 
 
-                let rectangle = self.detectRectangle(
-                    in:cgImage
+                let strictDetection = self.detectRectangle(
+                    in:cgImage,
+                    preferredCorners:preferredCorners
                 )
 
 
@@ -1331,7 +1484,9 @@ class ScanProcessor {
                 var allowsAlternateRecoveryCorners = false
 
 
-                if let rectangle {
+                if let strictDetection {
+
+                    let rectangle = strictDetection.rectangle
 
                     print("✅ 高分辨率严格识别到纸张")
 
@@ -1353,6 +1508,7 @@ class ScanProcessor {
                         message:"识别并校准纸张成功",
                         details:DocumentRectangleSelector
                             .diagnosticDetails(for:rectangle)
+                            + "；" + strictDetection.selectionDetails
                     )
 
                 }
@@ -1587,6 +1743,14 @@ class ScanProcessor {
                         )
                     }
                 ) { recoveryOutput in
+                    DispatchQueue.global(qos:.utility).async {
+                        ColorTemperatureDiagnostics.analyzeAndRecord(
+                            image:recoveryOutput.image,
+                            blocks:recoveryOutput.enhancementSeed?
+                                .ocrResult.blocks ?? [],
+                            pageNumber:pageNumber
+                        )
+                    }
                     self.queue.async {
                         autoreleasepool {
                             let page = self.makeScanPage(
@@ -1635,11 +1799,12 @@ class ScanProcessor {
 
                 var selectedCorners:ScanCorners?
 
-                if let rectangle = self.detectRectangle(
-                    in:cgImage
+                if let strictDetection = self.detectRectangle(
+                    in:cgImage,
+                    preferredCorners:nil
                 ) {
                     selectedCorners = DocumentRectangleSelector
-                        .corners(from:rectangle)
+                        .corners(from:strictDetection.rectangle)
                 }
                 else if RecognitionSettings
                     .smallDocumentFallbackEnabled {
@@ -1750,8 +1915,9 @@ class ScanProcessor {
 
 
     private func detectRectangle(
-        in image:CGImage
-    )->VNRectangleObservation? {
+        in image:CGImage,
+        preferredCorners:ScanCorners?
+    )->StrictDocumentDetectionResult? {
 
 
         let request = VNDetectRectanglesRequest()
@@ -1775,9 +1941,17 @@ class ScanProcessor {
 
             try handler.perform([request])
 
-            return DocumentRectangleSelector.best(
-                in:request.results ?? []
+            let selection = DocumentRectangleSelector.bestStrictSelection(
+                in:request.results ?? [],
+                preferredCorners:preferredCorners
             )
+
+            return selection.rectangle.map {
+                StrictDocumentDetectionResult(
+                    rectangle:$0,
+                    selectionDetails:selection.details
+                )
+            }
 
         }
         catch {
@@ -2461,6 +2635,7 @@ enum LocalTextRecognizer {
         pageNumber:Int = 1,
         background:Bool = false,
         recoveryComparison:Bool = false,
+        profile:OCRRecognitionProfile? = nil,
         completion:@escaping (Result<OCRPageResult,Error>)->Void
     ) {
         guard let cgImage = image.cgImage else {
@@ -2468,6 +2643,10 @@ enum LocalTextRecognizer {
             return
         }
 
+        let effectiveProfile = profile
+            ?? (recoveryComparison
+                ? .recoveryComparison
+                : (background ? .searchIndex : .userText))
         let queue:DispatchQueue
         if recoveryComparison {
             queue = recoveryComparisonQueue
@@ -2547,13 +2726,14 @@ enum LocalTextRecognizer {
                     )
                 }
 
-                request.recognitionLevel = .accurate
+                request.recognitionLevel = effectiveProfile.recognitionLevel
                 request.recognitionLanguages = [
                     "zh-Hans",
                     "zh-Hant",
                     "en-US"
                 ]
-                request.usesLanguageCorrection = true
+                request.usesLanguageCorrection = effectiveProfile
+                    .usesLanguageCorrection
 
                 let handler = VNImageRequestHandler(
                     cgImage:cgImage,

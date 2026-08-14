@@ -23,7 +23,8 @@ enum IlluminationQualityAnalyzer {
 
     static func analyze(
         image:UIImage,
-        blocks:[OCRBlock]
+        blocks:[OCRBlock],
+        treatDarkPixelsAsPossibleInk:Bool = false
     )->IlluminationQualityResult {
         guard let sample = sample(image) else {
             return IlluminationQualityResult(
@@ -61,18 +62,42 @@ enum IlluminationQualityAnalyzer {
         let middle = robustBrightMean(regions[1])
         let bottom = robustBrightMean(regions[2])
         let gradient = max(top, middle, bottom) - min(top, middle, bottom)
-        let globalMean = mean(background)
-        let deviation = standardDeviation(background, mean:globalMean)
+        let statisticalBackground: [Float]
+        if treatDarkPixelsAsPossibleInk {
+            // Before OCR there is no text mask. Discard the darkest portion
+            // for background statistics so dense black text is not mistaken
+            // for uneven paper illumination.
+            statisticalBackground = upperValues(
+                background,
+                discardingLowerFraction:0.22
+            )
+        }
+        else {
+            statisticalBackground = background
+        }
+        let globalMean = mean(statisticalBackground)
+        let deviation = standardDeviation(
+            statisticalBackground,
+            mean:globalMean
+        )
         let uniformity = max(0, min(1, 1 - deviation * 3.4))
-        let darkFraction = background.isEmpty ? 0 : Float(
+        let rawDarkFraction = background.isEmpty ? 0 : Float(
             background.filter { $0 < globalMean - 0.10 }.count
         ) / Float(background.count)
+        let darkFraction = treatDarkPixelsAsPossibleInk
+            ? max(rawDarkFraction - 0.16, 0) / 0.84
+            : rawDarkFraction
         let shadow = min(1, darkFraction * 1.55 + gradient * 1.35)
+        let localizedShadow = shadow >= 0.095
+            && uniformity <= 0.88
         // Dense text and textured paper can lower `uniformity`; that signal
-        // alone must never route a page into illumination correction.
+        // alone must never route a page into illumination correction. A
+        // localized shadow may have very little top-to-bottom gradient, so it
+        // is allowed through only when dark-area and uniformity evidence agree.
         let needs = gradient >= 0.080
-            || (gradient >= 0.055 && shadow >= 0.16)
-            || (uniformity < 0.72 && shadow >= 0.20)
+            || (gradient >= 0.050 && shadow >= 0.12)
+            || localizedShadow
+            || (uniformity < 0.72 && shadow >= 0.16)
 
         return IlluminationQualityResult(
             topBrightness:top,
@@ -105,6 +130,19 @@ enum IlluminationQualityAnalyzer {
         let start = Int(Float(sorted.count) * 0.45)
         let end = max(Int(Float(sorted.count) * 0.92), start + 1)
         return mean(Array(sorted[start..<min(end, sorted.count)]))
+    }
+
+    private static func upperValues(
+        _ values:[Float],
+        discardingLowerFraction:Float
+    )->[Float] {
+        guard !values.isEmpty else { return [] }
+        let sorted = values.sorted()
+        let start = min(
+            Int(Float(sorted.count) * discardingLowerFraction),
+            sorted.count - 1
+        )
+        return Array(sorted[start...])
     }
 
     private static func mean(_ values:[Float])->Float {

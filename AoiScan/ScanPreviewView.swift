@@ -457,7 +457,8 @@ struct ScanPreviewView:View {
             SmartEnhancementPipeline.process(
                 rgbImage:sourceImage,
                 pageNumber:index + 1,
-                baselineSeed:baselineSeed
+                baselineSeed:baselineSeed,
+                captureCorners:pages[index].detectedCorners
             ) { output in
                 guard viewIsActive,
                       activeEnhancementPageID == pageID else {
@@ -479,14 +480,10 @@ struct ScanPreviewView:View {
 
                     pages[currentIndex] = page
 
-                    if !manuallyRecognizedPageIDs.contains(pageID),
-                       let result = output.ocrResult {
-                        let normalized = result.withPageNumber(
-                            currentIndex + 1
-                        )
-                        recognizedResults[currentIndex] = normalized
-                        recognizedTexts[currentIndex] = normalized.plainText
-                    }
+                    // Smart enhancement OCR is intentionally a lightweight
+                    // quality comparison. Do not persist it as user OCR or a
+                    // search index. Manual recognition and background indexing
+                    // continue to use their full-quality profiles.
                 }
 
                 activeEnhancementPageID = nil

@@ -104,5 +104,7 @@ struct EnhancementTrialSummary:Codable {
     let colorRetention:ColorRetentionResult?
     let documentQuality:DocumentQualityScore?
     let reusedBaselineOCR:Bool
+    let preflight:EnhancementPreflightResult?
+    let secondOCRPerformed:Bool
     var selected:Bool
 }

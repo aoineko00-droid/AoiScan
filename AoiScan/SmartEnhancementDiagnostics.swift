@@ -54,6 +54,21 @@ enum SmartEnhancementDiagnostics {
                 "实际测试 %@ 个，跳过 %@ 个",
                 String(output.executedCandidateCount),
                 String(output.skippedCandidateCount)
+            ),
+            L10n.format(
+                "OCR前预检跳过 %@ 次，预计节省 %@ms",
+                String(output.preflightSkippedOCRCount),
+                String(output.estimatedMillisecondsSaved)
+            ),
+            L10n.format(
+                "质量评估OCR %@，最长边 %@px，语言纠错 %@，基准OCR耗时 %@ms",
+                L10n.text(OCRRecognitionProfile.qualityEvaluation.diagnosticName),
+                "1800",
+                L10n.text("关闭"),
+                String(
+                    output.trialSummaries.first?
+                        .processingMilliseconds ?? 0
+                )
             )
         ]
 
@@ -63,6 +78,49 @@ enum SmartEnhancementDiagnostics {
                     "早停原因 %@",
                     L10n.text(earlyStopReason)
                 )
+            )
+        }
+
+        if let visual = output.baselineVisualPreflight {
+            lines.append(
+                L10n.format(
+                    "基准OCR %@，视觉预检 %@ms，预计节省 %@ms",
+                    L10n.text(
+                        output.baselineOCRPerformed ? "已执行" : "已跳过"
+                    ),
+                    String(visual.processingMilliseconds),
+                    String(visual.estimatedMillisecondsSaved)
+                )
+            )
+            lines.append(
+                [
+                    "[OCR前视觉预检]",
+                    L10n.text(visual.decision.diagnosticName),
+                    "size=\(visual.pixelWidth)x\(visual.pixelHeight)",
+                    "top=\(decimal(visual.topSharpness))",
+                    "middle=\(decimal(visual.middleSharpness))",
+                    "bottom=\(decimal(visual.bottomSharpness))",
+                    "average=\(decimal(visual.averageSharpness))",
+                    "balance=\(percent(visual.sharpnessBalance))",
+                    "brightness=\(percent(visual.backgroundBrightness))",
+                    "background=\(percent(visual.backgroundUniformity))",
+                    "topLight=\(percent(visual.topBrightness))",
+                    "middleLight=\(percent(visual.middleBrightness))",
+                    "bottomLight=\(percent(visual.bottomBrightness))",
+                    "lightGradient=\(percent(visual.illuminationGradient))",
+                    "shadow=\(percent(visual.shadowSeverity))",
+                    "smallTextRisk=\(visual.smallTextRisk.level.rawValue)",
+                    "textRegions=\(visual.smallTextRisk.detectedTextRegionCount)",
+                    "smallRatio=\(percent(visual.smallTextRisk.smallTextRatio))",
+                    "topConcentration=\(percent(visual.smallTextRisk.topConcentration))",
+                    "topSmallRatio=\(percent(visual.smallTextRisk.topSmallTextRatio))",
+                    "medianTextHeight=\(decimal(visual.smallTextRisk.medianTextHeight))",
+                    "topRetention=\(boundedPercent(visual.smallTextRisk.topSharpnessRetention))",
+                    "topBottom=\(percent(visual.smallTextRisk.topBottomWidthRatio))",
+                    "smallTextTime=\(visual.smallTextRisk.processingMilliseconds)ms",
+                    "smallTextReason=\(L10n.text(visual.smallTextRisk.reason))",
+                    "reason=\(L10n.text(visual.reason))"
+                ].joined(separator:"，")
             )
         }
 
@@ -101,6 +159,18 @@ enum SmartEnhancementDiagnostics {
         let reusedOCR = trial.reusedBaselineOCR
             ? L10n.text("是")
             : L10n.text("否")
+        let secondOCR = trial.secondOCRPerformed
+            ? L10n.text("是")
+            : L10n.text("否")
+        let preflight = trial.preflight
+        let preflightStatus:String
+        if let preflight {
+            preflightStatus = preflight.shouldRunOCR
+                ? L10n.text("通过") : L10n.text("早停")
+        }
+        else {
+            preflightStatus = "--"
+        }
 
         return [
             "[\(trial.variant.rawValue)]",
@@ -137,10 +207,22 @@ enum SmartEnhancementDiagnostics {
             "halo=\(percent(trial.documentQuality?.visual.haloPenalty))",
             "noise=\(percent(trial.documentQuality?.visual.noisePenalty))",
             "structure=\(percent(trial.documentQuality?.visual.textStructureScore))",
+            "preflight=\(preflightStatus)",
+            "backgroundGain=\(percent(preflight?.backgroundGain))",
+            "shadowReduction=\(percent(preflight?.shadowReduction))",
+            "gradientReduction=\(percent(preflight?.gradientReduction))",
+            "regionalGain=\(percent(preflight?.regionalClarityGain))",
+            "structureChange=\(percent(preflight?.textStructureChange))",
+            "haloChange=\(percent(preflight?.haloChange))",
+            "noiseChange=\(percent(preflight?.noiseChange))",
+            "brightnessChange=\(percent(preflight?.brightnessChange))",
+            "secondOCR=\(secondOCR)",
+            "estimatedSaved=\(preflight?.estimatedMillisecondsSaved ?? 0)ms",
             "reusedOCR=\(reusedOCR)",
             "time=\(trial.processingMilliseconds)ms",
             "evaluator=\(accepted)",
-            "selected=\(selected)"
+            "selected=\(selected)",
+            "preflightReason=\(preflight.map { L10n.text($0.reason) } ?? "--")"
         ]
         .joined(separator:"，")
     }
@@ -152,6 +234,27 @@ enum SmartEnhancementDiagnostics {
 
     private static func decimal(_ value:CGFloat)->String {
         String(format:"%.3f", value)
+    }
+
+    private static func decimal(_ value:Double)->String {
+        String(format:"%.3f", value)
+    }
+
+    private static func percent(_ value:Double)->String {
+        String(format:"%.1f%%", value * 100)
+    }
+
+    private static func boundedPercent(_ value:Double)->String {
+        percent(min(max(value, 0), 1))
+    }
+
+    private static func percent(_ value:CGFloat)->String {
+        String(format:"%.1f%%", Double(value) * 100)
+    }
+
+    private static func percent(_ value:CGFloat?)->String {
+        guard let value else { return "--" }
+        return percent(value)
     }
 
     private static func boolean(_ value:Bool?)->String {

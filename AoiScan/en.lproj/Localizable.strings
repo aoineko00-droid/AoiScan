@@ -291,6 +291,10 @@
 "轻量增强未取得文字，停止后续测试" = "Light enhancement found no text; later tests were stopped";
 "轻量增强质量下降，停止中等增强测试" = "Light enhancement reduced quality; medium enhancement was stopped";
 "拍摄完成" = "Photo Captured";
+"已拍摄" = "Captured";
+"正在获取高清原图…" = "Loading the high-resolution photo…";
+"画面智能处理中…" = "Optimizing the image…";
+"正在校正纸张并优化文字清晰度" = "Correcting the document and improving text clarity";
 "第 %@ 页已拍摄" = "Page %@ Captured";
 "照片已保存，正在准备处理" = "The photo is saved and ready for processing";
 "正在校正纸张…" = "Correcting the document…";

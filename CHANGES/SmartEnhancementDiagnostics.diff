@@ -1,0 +1,54 @@
+--- AoiScan-instant-capture-feedback-work/AoiScan/SmartEnhancementDiagnostics.swift	2026-08-13 10:56:52
++++ AoiScan-speed-convergence-color-diagnostics-work/AoiScan/SmartEnhancementDiagnostics.swift	2026-08-13 16:51:41
+@@ -54,6 +54,11 @@
+                 "实际测试 %@ 个，跳过 %@ 个",
+                 String(output.executedCandidateCount),
+                 String(output.skippedCandidateCount)
++            ),
++            L10n.format(
++                "OCR前预检跳过 %@ 次，预计节省 %@ms",
++                String(output.preflightSkippedOCRCount),
++                String(output.estimatedMillisecondsSaved)
+             )
+         ]
+ 
+@@ -101,6 +106,18 @@
+         let reusedOCR = trial.reusedBaselineOCR
+             ? L10n.text("是")
+             : L10n.text("否")
++        let secondOCR = trial.secondOCRPerformed
++            ? L10n.text("是")
++            : L10n.text("否")
++        let preflight = trial.preflight
++        let preflightStatus:String
++        if let preflight {
++            preflightStatus = preflight.shouldRunOCR
++                ? L10n.text("通过") : L10n.text("早停")
++        }
++        else {
++            preflightStatus = "--"
++        }
+ 
+         return [
+             "[\(trial.variant.rawValue)]",
+@@ -137,10 +154,19 @@
+             "halo=\(percent(trial.documentQuality?.visual.haloPenalty))",
+             "noise=\(percent(trial.documentQuality?.visual.noisePenalty))",
+             "structure=\(percent(trial.documentQuality?.visual.textStructureScore))",
++            "preflight=\(preflightStatus)",
++            "backgroundGain=\(percent(preflight?.backgroundGain))",
++            "shadowReduction=\(percent(preflight?.shadowReduction))",
++            "gradientReduction=\(percent(preflight?.gradientReduction))",
++            "regionalGain=\(percent(preflight?.regionalClarityGain))",
++            "brightnessChange=\(percent(preflight?.brightnessChange))",
++            "secondOCR=\(secondOCR)",
++            "estimatedSaved=\(preflight?.estimatedMillisecondsSaved ?? 0)ms",
+             "reusedOCR=\(reusedOCR)",
+             "time=\(trial.processingMilliseconds)ms",
+             "evaluator=\(accepted)",
+-            "selected=\(selected)"
++            "selected=\(selected)",
++            "preflightReason=\(preflight.map { L10n.text($0.reason) } ?? "--")"
+         ]
+         .joined(separator:"，")
+     }

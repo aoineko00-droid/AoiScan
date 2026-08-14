@@ -1,0 +1,10 @@
+--- AoiScan-instant-capture-feedback-work/AoiScan/EnhancementParameters.swift	2026-08-13 10:56:52
++++ AoiScan-speed-convergence-color-diagnostics-work/AoiScan/EnhancementParameters.swift	2026-08-13 16:46:05
+@@ -104,5 +104,7 @@
+     let colorRetention:ColorRetentionResult?
+     let documentQuality:DocumentQualityScore?
+     let reusedBaselineOCR:Bool
++    let preflight:EnhancementPreflightResult?
++    let secondOCRPerformed:Bool
+     var selected:Bool
+ }

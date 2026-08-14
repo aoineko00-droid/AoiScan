@@ -30,39 +30,45 @@ enum DocumentQualityRouter {
         }
 
         let visual = quality.visual
-        let strongGradient = visual.illuminationGradient >= 0.055
-        let strongShadow = visual.shadowSeverity >= 0.16
-        let severeGradient = visual.illuminationGradient >= 0.080
-        if severeGradient || (strongGradient && strongShadow) {
+        // Normal lighting variation is diagnostic information, not a reason to
+        // spend another full OCR pass. Only route genuinely strong problems.
+        let strongGradient = visual.illuminationGradient >= 0.075
+        let strongShadow = visual.shadowSeverity >= 0.18
+        let severeGradient = visual.illuminationGradient >= 0.10
+        let localizedShadow = visual.shadowSeverity >= 0.095
+            && visual.backgroundUniformity <= 0.88
+        if severeGradient
+            || (strongGradient && strongShadow)
+            || localizedShadow {
+            let reason = localizedShadow && !severeGradient
+                ? "局部阴影与背景不均证据同时达到恢复门槛"
+                : "亮度梯度与阴影证据同时达到光照恢复门槛"
             return DocumentQualityRoute(
                 primaryIssue:.lighting,
                 affectedRegion:.none,
                 severity:min(
                     max(
-                        visual.illuminationGradient / 0.12,
-                        visual.shadowSeverity
+                        visual.illuminationGradient / 0.18,
+                        visual.shadowSeverity / 0.22
                     ),
                     1
                 ),
-                reason:"亮度梯度与阴影证据同时达到光照恢复门槛"
+                reason:reason
             )
         }
 
-        if let regional = regionalSharpnessRoute(
-            visual:visual,
-            blocks:blocks
-        ) {
-            return regional
-        }
+        // Regional sharpness differences remain in diagnostics. They are not
+        // routed to production enhancement until a cheap pre-OCR metric can
+        // demonstrate a reliable gain.
 
-        if visual.backgroundUniformity < 0.72,
-           visual.shadowSeverity >= 0.20 {
+        if visual.backgroundUniformity < 0.58,
+           visual.shadowSeverity >= 0.32 {
             return DocumentQualityRoute(
                 primaryIssue:.background,
                 affectedRegion:.none,
                 severity:min(
-                    (0.72 - visual.backgroundUniformity) * 2.2
-                        + visual.shadowSeverity * 0.45,
+                    (0.58 - visual.backgroundUniformity) * 2.2
+                        + visual.shadowSeverity * 0.55,
                     1
                 ),
                 reason:"背景均匀度与局部暗区同时达到背景恢复门槛"

@@ -431,7 +431,8 @@ final class OCRIndexManager:ObservableObject {
         LocalTextRecognizer.recognize(
             image:image,
             pageNumber:page.pageNumber,
-            background:true
+            background:true,
+            profile:.searchIndex
         ) { result in
             var pageText = ""
             var pageResult:OCRPageResult?

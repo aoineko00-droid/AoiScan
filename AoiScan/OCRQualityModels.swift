@@ -81,6 +81,10 @@ struct SmartEnhancementOutput {
     let executedCandidateCount:Int
     let skippedCandidateCount:Int
     let documentQualityRoute:DocumentQualityRoute
+    let preflightSkippedOCRCount:Int
+    let estimatedMillisecondsSaved:Int
+    let baselineVisualPreflight:BaselineVisualPreflightResult?
+    let baselineOCRPerformed:Bool
 }
 
 
