@@ -10,6 +10,10 @@ import CoreImage.CIFilterBuiltins
 
 
 struct ScanPreviewView:View {
+    let destinationFolderID:UUID?
+    let appendDocumentID:UUID?
+    let onAppendSaved:((Int)->Void)?
+
     @State private var pages:[ScanPage]
     @State private var currentPage = 0
     @State private var saving = false
@@ -32,7 +36,15 @@ struct ScanPreviewView:View {
     @Environment(\.dismiss)
     private var dismiss
 
-    init(pages:[ScanPage]) {
+    init(
+        pages:[ScanPage],
+        destinationFolderID:UUID? = nil,
+        appendDocumentID:UUID? = nil,
+        onAppendSaved:((Int)->Void)? = nil
+    ) {
+        self.destinationFolderID = destinationFolderID
+        self.appendDocumentID = appendDocumentID
+        self.onAppendSaved = onAppendSaved
         _pages = State(initialValue:pages)
     }
 
@@ -185,6 +197,7 @@ struct ScanPreviewView:View {
                 }
             }
         }
+        .interactiveDismissDisabled(saving)
         .onAppear {
             viewIsActive = true
             presentManualCropIfNeeded()
@@ -283,7 +296,11 @@ struct ScanPreviewView:View {
                 }
                 else {
                     Image(systemName:"square.and.arrow.down")
-                    Text("保存扫描")
+                    Text(
+                        appendDocumentID == nil
+                            ? L10n.text("保存扫描")
+                            : L10n.text("添加到文档")
+                    )
                 }
             }
             .frame(maxWidth:.infinity)
@@ -311,6 +328,9 @@ struct ScanPreviewView:View {
         page.detectedCorners = result.corners
         page.suggestedCropCorners = nil
         page.smartEnhancementSeed = nil
+        // The checkmark confirms both crop and visible orientation. Subsequent
+        // smart enhancement may analyze content but must not rotate it again.
+        page.userConfirmedOrientation = true
         let preview = filteredImage(
             result.image,
             filter:page.filter
@@ -458,7 +478,9 @@ struct ScanPreviewView:View {
                 rgbImage:sourceImage,
                 pageNumber:index + 1,
                 baselineSeed:baselineSeed,
-                captureCorners:pages[index].detectedCorners
+                captureCorners:pages[index].detectedCorners,
+                allowsSemanticRotation:
+                    !pages[index].userConfirmedOrientation
             ) { output in
                 guard viewIsActive,
                       activeEnhancementPageID == pageID else {
@@ -545,11 +567,29 @@ struct ScanPreviewView:View {
         guard !pages.isEmpty else { return }
         saving = true
 
+        Task {
+            await performSaveDocument()
+        }
+    }
+
+    private func performSaveDocument() async {
+
         let fileManager = FileManager.default
         let folderIdentifier = UUID().uuidString
-        let folderURL = ScanManager.documentFolderURL(
-            for:folderIdentifier
-        )
+        let folderURL:URL
+
+        if appendDocumentID == nil {
+            folderURL = ScanManager.documentFolderURL(
+                for:folderIdentifier
+            )
+        }
+        else {
+            folderURL = ScanManager.documentsRootURL
+                .appendingPathComponent(
+                    ".aoiscan-append-\(folderIdentifier)",
+                    isDirectory:true
+                )
+        }
 
         do {
             try fileManager.createDirectory(
@@ -604,7 +644,9 @@ struct ScanPreviewView:View {
                 ScanPageMetadata(
                     pageNumber:index + 1,
                     corners:pages[index].detectedCorners,
-                    filter:pages[index].filter
+                    filter:pages[index].filter,
+                    userConfirmedOrientation:
+                        pages[index].userConfirmedOrientation
                 )
             }
 
@@ -621,9 +663,26 @@ struct ScanPreviewView:View {
                 options:.atomic
             )
 
-            try createRecord(
-                folderIdentifier:folderIdentifier
-            )
+            if let appendDocumentID {
+                let firstAddedPageIndex = try await ScanManager.shared
+                    .appendPages(
+                        from:folderURL,
+                        toDocumentID:appendDocumentID
+                    )
+
+                if fileManager.fileExists(atPath:folderURL.path) {
+                    try? fileManager.removeItem(at:folderURL)
+                }
+                removeTemporaryPageFiles()
+                saving = false
+                onAppendSaved?(firstAddedPageIndex)
+                dismiss()
+            }
+            else {
+                try createRecord(
+                    folderIdentifier:folderIdentifier
+                )
+            }
         }
         catch {
             print("保存失败:", error)
@@ -650,6 +709,9 @@ struct ScanPreviewView:View {
         document.title = L10n.text("扫描文档")
         document.folderPath = folderIdentifier
         document.createdAt = Date()
+        document.parentFolder = ScanManager.shared.folder(
+            withID:destinationFolderID
+        )
 
         do {
             try context.save()

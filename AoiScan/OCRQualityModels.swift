@@ -91,10 +91,29 @@ struct SmartEnhancementOutput {
 /// Transient OCR produced for the exact adjusted page used by smart mode.
 /// It is never persisted and must be discarded after crop/rotation changes.
 struct SmartEnhancementSeed {
-    let ocrResult:OCRPageResult
-    let quality:OCRQualityResult
+    let ocrResult:OCRPageResult?
+    let quality:OCRQualityResult?
+    let contentPreflight:DocumentContentPreflightResult?
     let sourcePixelWidth:Int
     let sourcePixelHeight:Int
+
+    init(
+        ocrResult:OCRPageResult? = nil,
+        quality:OCRQualityResult? = nil,
+        contentPreflight:DocumentContentPreflightResult? = nil,
+        sourcePixelWidth:Int,
+        sourcePixelHeight:Int
+    ) {
+        self.ocrResult = ocrResult
+        self.quality = quality
+        self.contentPreflight = contentPreflight
+        self.sourcePixelWidth = sourcePixelWidth
+        self.sourcePixelHeight = sourcePixelHeight
+    }
+
+    var canReuseQualityComparison:Bool {
+        ocrResult != nil && quality != nil
+    }
 
     func isCompatible(with image:UIImage)->Bool {
         let width = image.cgImage?.width
@@ -114,6 +133,19 @@ struct ColorRetentionResult:Codable {
     let blueRetention:Float
     let redSampleCount:Int
     let blueSampleCount:Int
+    let actualChromaSampleCount:Int
+    let actualColorContentSampleCount:Int
+    let excludedNonColorSampleCount:Int
+    let colorContentSampleRatio:Float?
+    let hasRealColorSamples:Bool
+    let severeColorLossFraction:Float?
+    let severeRedLossFraction:Float?
+    let severeBlueLossFraction:Float?
+    let minimumRegionalColorRetention:Float?
+    let nearBoundaryToleranceApplied:Bool
+    let firstRejectedColorMetric:String?
+    let firstRejectedColorValue:Float?
+    let firstRejectedColorThreshold:Float?
 
     static let identity = ColorRetentionResult(
         overallRetention:1,
@@ -122,6 +154,42 @@ struct ColorRetentionResult:Codable {
         redRetention:1,
         blueRetention:1,
         redSampleCount:0,
-        blueSampleCount:0
+        blueSampleCount:0,
+        actualChromaSampleCount:0,
+        actualColorContentSampleCount:0,
+        excludedNonColorSampleCount:0,
+        colorContentSampleRatio:nil,
+        hasRealColorSamples:false,
+        severeColorLossFraction:nil,
+        severeRedLossFraction:nil,
+        severeBlueLossFraction:nil,
+        minimumRegionalColorRetention:nil,
+        nearBoundaryToleranceApplied:false,
+        firstRejectedColorMetric:nil,
+        firstRejectedColorValue:nil,
+        firstRejectedColorThreshold:nil
+    )
+
+    static let scanWhiteFailure = ColorRetentionResult(
+        overallRetention:0,
+        chromaSimilarity:0,
+        saturatedColorRetention:0,
+        redRetention:0,
+        blueRetention:0,
+        redSampleCount:0,
+        blueSampleCount:0,
+        actualChromaSampleCount:0,
+        actualColorContentSampleCount:0,
+        excludedNonColorSampleCount:0,
+        colorContentSampleRatio:nil,
+        hasRealColorSamples:false,
+        severeColorLossFraction:nil,
+        severeRedLossFraction:nil,
+        severeBlueLossFraction:nil,
+        minimumRegionalColorRetention:nil,
+        nearBoundaryToleranceApplied:false,
+        firstRejectedColorMetric:"samplingFailure",
+        firstRejectedColorValue:nil,
+        firstRejectedColorThreshold:nil
     )
 }

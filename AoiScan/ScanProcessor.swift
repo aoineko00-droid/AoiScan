@@ -23,6 +23,7 @@ struct ScanPageMetadata:Codable {
     let pageNumber:Int
     var corners:ScanCorners?
     var filter:ScanPageFilter? = nil
+    var userConfirmedOrientation:Bool? = nil
 }
 
 
@@ -45,6 +46,7 @@ struct ScanPage:Identifiable {
     var detectedCorners:ScanCorners?
     var suggestedCropCorners:ScanCorners?
     var filter:ScanPageFilter
+    var userConfirmedOrientation:Bool
     /// Transient OCR captured while comparing recovery candidates. This is
     /// intentionally kept in memory only and invalidated after geometry edits.
     var smartEnhancementSeed:SmartEnhancementSeed?
@@ -61,6 +63,7 @@ struct ScanPage:Identifiable {
         detectedCorners:ScanCorners?,
         suggestedCropCorners:ScanCorners? = nil,
         filter:ScanPageFilter = .smart,
+        userConfirmedOrientation:Bool = false,
         smartEnhancementSeed:SmartEnhancementSeed? = nil
     ) {
         self.id = id
@@ -70,6 +73,7 @@ struct ScanPage:Identifiable {
         self.detectedCorners = detectedCorners
         self.suggestedCropCorners = suggestedCropCorners
         self.filter = filter
+        self.userConfirmedOrientation = userConfirmedOrientation
         self.smartEnhancementSeed = smartEnhancementSeed
         self.temporaryDirectoryURL = nil
         self.originalImageURL = nil
@@ -407,6 +411,15 @@ private struct SmallDocumentDetectionResult {
     let textObservations:[VNRecognizedTextObservation]
     let detectionSource:String
     let selectionReason:String
+    let hasCompletePageEvidence:Bool
+    let completenessEvidenceSource:String
+}
+
+private struct DocumentFallbackSelectionResult {
+    let rectangles:[VNRectangleObservation]
+    let reason:String
+    let hasCompletePageEvidence:Bool
+    let completenessEvidenceSource:String
 }
 
 
@@ -430,6 +443,12 @@ enum DocumentRectangleSelector {
             bottomRight:uiPoint(rectangle.bottomRight),
             bottomLeft:uiPoint(rectangle.bottomLeft)
         )
+    }
+
+    static func documentCoverage(
+        of rectangle:VNRectangleObservation
+    )->CGFloat {
+        quadrilateralArea(rectangle)
     }
 
     static func best(
@@ -551,6 +570,20 @@ enum DocumentRectangleSelector {
                     textObservations:textObservations
                 )
             }
+            .filter { rectangle in
+                let area = boxArea(rectangle)
+                guard area < 0.25 else { return true }
+                let containedTextCount = textObservations.filter {
+                    rectangle.boundingBox.intersects($0.boundingBox)
+                }
+                .count
+                let containedTextRatio = textObservations.isEmpty
+                    ? 0
+                    : CGFloat(containedTextCount)
+                        / CGFloat(textObservations.count)
+                return containedTextCount >= 2
+                    && containedTextRatio >= 0.78
+            }
         guard let scoredBest = candidates.max(by:{
                 smallDocumentScore(
                     $0,
@@ -590,13 +623,10 @@ enum DocumentRectangleSelector {
     /// This prevents two internal rectangles on one A4 sheet from being merged
     /// as a book, while preserving a real spread when the best single candidate
     /// is only one of its pages.
-    static func bestFallbackSelection(
+    fileprivate static func bestFallbackSelection(
         in observations:[VNRectangleObservation],
         textObservations:[VNRecognizedTextObservation]
-    )->(
-        rectangles:[VNRectangleObservation],
-        reason:String
-    ) {
+    )->DocumentFallbackSelectionResult {
         let selectedPair = bestBookPagePair(
             in:observations,
             textObservations:textObservations
@@ -608,21 +638,36 @@ enum DocumentRectangleSelector {
 
         switch (selectedSingle, selectedPair) {
         case (.none, .none):
-            return (
-                [],
-                "没有通过规则的完整单页或左右书页候选"
+            return .init(
+                rectangles:[],
+                reason:"没有通过规则的完整单页或左右书页候选",
+                hasCompletePageEvidence:false,
+                completenessEvidenceSource:"none"
             )
 
         case (.some(let single), .none):
-            return (
-                [single],
-                "仅检测到可信完整单页"
+            let evidenceSource = completePageEvidenceSource(
+                for:single,
+                textObservations:textObservations
+            )
+            return .init(
+                rectangles:[single],
+                reason:"仅检测到可信完整单页",
+                hasCompletePageEvidence:evidenceSource != nil,
+                completenessEvidenceSource:evidenceSource ?? "none"
             )
 
         case (.none, .some(let pair)):
-            return (
+            let evidence = pairCoverageEvidence(
                 pair,
-                "没有可信完整单页，采用左右书页候选"
+                textObservations:textObservations
+            )
+            return .init(
+                rectangles:pair,
+                reason:"没有可信完整单页，采用左右书页候选",
+                hasCompletePageEvidence:evidence,
+                completenessEvidenceSource:evidence
+                    ? "textDistribution" : "none"
             )
 
         case (.some(let single), .some(let pair)):
@@ -652,25 +697,104 @@ enum DocumentRectangleSelector {
                 && enclosesPairEdges
 
             if singleIsCredibleOuterPage {
-                return (
-                    [single],
-                    String(
+                let evidenceSource = completePageEvidenceSource(
+                    for:single,
+                    textObservations:textObservations
+                )
+                let evidence = evidenceSource != nil
+                    && pairCoverage >= 0.90
+                return .init(
+                    rectangles:[single],
+                    reason:String(
                         format:
                             "完整单页覆盖左右候选 %.0f%%，优先采用外围单页",
                         pairCoverage * 100
-                    )
+                    ),
+                    hasCompletePageEvidence:evidence,
+                    completenessEvidenceSource:evidence
+                        ? (evidenceSource ?? "none") : "none"
                 )
             }
 
-            return (
+            let pairEvidence = pairCoverageEvidence(
                 pair,
-                String(
+                textObservations:textObservations
+            )
+            return .init(
+                rectangles:pair,
+                reason:String(
                     format:
                         "完整单页仅覆盖左右候选 %.0f%%，采用左右书页",
                     pairCoverage * 100
-                )
+                ),
+                hasCompletePageEvidence:pairEvidence,
+                completenessEvidenceSource:pairEvidence
+                    ? "textDistribution" : "none"
             )
         }
+    }
+
+    private static func completePageEvidenceSource(
+        for rectangle:VNRectangleObservation,
+        textObservations:[VNRecognizedTextObservation]
+    )->String? {
+        let area = boxArea(rectangle)
+        let shapeScore = quadrilateralArea(rectangle)
+            / max(area, 0.0001)
+        let box = rectangle.boundingBox
+        let centerDistance = distance(
+            CGPoint(x:box.midX, y:box.midY),
+            CGPoint(x:0.5, y:0.5)
+        )
+        let shorterSide = min(box.width, box.height)
+        let longerSide = max(box.width, box.height)
+        let pageAspect = shorterSide / max(longerSide, 0.0001)
+        let containedTextCount = textObservations.filter {
+            rectangle.boundingBox.intersects($0.boundingBox)
+        }
+        .count
+        let containedTextRatio = textObservations.isEmpty
+            ? 0
+            : CGFloat(containedTextCount)
+                / CGFloat(textObservations.count)
+        let textDistributionEvidence = area >= 0.25
+            && shapeScore >= 0.62
+            && containedTextCount >= 2
+            && containedTextRatio >= 0.78
+        if textDistributionEvidence { return "textDistribution" }
+        let strongOuterGeometryEvidence = area >= 0.40
+            && rectangle.confidence >= 0.90
+            && centerDistance <= 0.10
+            && shapeScore >= 0.88
+            && pageAspect >= 0.45
+            && pageAspect <= 0.85
+            && containedTextCount >= 1
+            && containedTextRatio >= 0.85
+        return strongOuterGeometryEvidence ? "strongOuterGeometry" : nil
+    }
+
+
+    private static func pairCoverageEvidence(
+        _ pair:[VNRectangleObservation],
+        textObservations:[VNRecognizedTextObservation]
+    )->Bool {
+        guard pair.count == 2 else { return false }
+        let pairUnion = pair
+            .map(\.boundingBox)
+            .reduce(CGRect.null) {
+                $0.union($1)
+            }
+        let containedTextCount = textObservations.filter {
+            pairUnion.intersects($0.boundingBox)
+        }
+        .count
+        let containedTextRatio = textObservations.isEmpty
+            ? 0
+            : CGFloat(containedTextCount)
+                / CGFloat(textObservations.count)
+        return pairUnion.width * pairUnion.height >= 0.40
+            && containedTextCount >= 2
+            && containedTextRatio >= 0.78
     }
 
 
@@ -1472,16 +1596,44 @@ class ScanProcessor {
                 }
 
 
-                let strictDetection = self.detectRectangle(
+                let initialStrictDetection = self.detectRectangle(
                     in:cgImage,
                     preferredCorners:preferredCorners
                 )
+                let strictCandidateCoverage = initialStrictDetection.map {
+                    DocumentRectangleSelector.documentCoverage(
+                        of:$0.rectangle
+                    )
+                }
+                let strictNeedsCompletenessConfirmation =
+                    strictCandidateCoverage.map { $0 < 0.25 } == true
+                let strictDetection:StrictDocumentDetectionResult? =
+                    strictNeedsCompletenessConfirmation
+                    ? nil : initialStrictDetection
+
+                if let initialStrictDetection,
+                   let strictCandidateCoverage,
+                   strictNeedsCompletenessConfirmation {
+                    RecognitionLogStore.shared.add(
+                        category:"裁切完整性复检",
+                        message:"小面积严格候选暂不直接裁切，转入外围与文字证据复检",
+                        details:String(
+                            format:"严格候选画面占比 %.1f%%；%@",
+                            strictCandidateCoverage * 100,
+                            initialStrictDetection.selectionDetails
+                        )
+                    )
+                }
 
 
                 var result = fixed
                 var detectedCorners:ScanCorners?
                 var suggestedCropCorners:ScanCorners?
                 var allowsAlternateRecoveryCorners = false
+                var smallCandidateCompletenessConfirmed = false
+                var requiresExplicitCompletenessEvidence = false
+                var completenessEvidenceSource = "notRequired"
+                var geometricCandidateSource = "strictOrStable"
 
 
                 if let strictDetection {
@@ -1503,45 +1655,54 @@ class ScanProcessor {
                         corners:selectedCorners
                     ) ?? fixed
 
-                    RecognitionLogStore.shared.add(
-                        category:"严格识别",
-                        message:"识别并校准纸张成功",
-                        details:DocumentRectangleSelector
-                            .diagnosticDetails(for:rectangle)
-                            + "；" + strictDetection.selectionDetails
-                    )
+                            RecognitionLogStore.shared.add(
+                                category:"严格识别",
+                                message:"识别并校准纸张成功",
+                                details:DocumentRectangleSelector
+                                    .diagnosticDetails(for:rectangle)
+                                    + "；" + strictDetection.selectionDetails
+                            )
+                            geometricCandidateSource = "strictDetection"
 
-                }
+                        }
                 else {
 
                     // 低分辨率预览的结果只在严格高分辨率识别失败时作为备用。
                     // 它必须已经通过连续多帧稳定性检查和几何检查。
+                    let preferredCoverage = preferredCorners.map {
+                        self.cornerCoverage($0)
+                    }
+                    let preferredNeedsCompletenessConfirmation =
+                        preferredCoverage.map { $0 < 0.25 } == true
+
                     if let preferredCorners,
-                       self.cornersAreUsable(preferredCorners) {
+                       self.cornersAreUsable(preferredCorners),
+                       !preferredNeedsCompletenessConfirmation {
 
                         let selectedCorners = self.insetCorners(
                             preferredCorners
                         )
 
-                        if let corrected = self.correct(
-                            image:fixed,
-                            corners:selectedCorners
-                        ){
+                            if let corrected = self.correct(
+                                image:fixed,
+                                corners:selectedCorners
+                            ){
 
                             detectedCorners = selectedCorners
                             result = corrected
 
                             print("✅ 高分辨率识别未命中，已使用连续稳定的纸张定位")
 
-                            RecognitionLogStore.shared.add(
-                                category:"连续帧定位",
-                                message:"严格识别未命中，使用拍摄前稳定定位校准成功",
-                                details:self.cornerDiagnosticDetails(
-                                    selectedCorners
+                                RecognitionLogStore.shared.add(
+                                    category:"连续帧定位",
+                                    message:"严格识别未命中，使用拍摄前稳定定位校准成功",
+                                    details:self.cornerDiagnosticDetails(
+                                        selectedCorners
+                                    )
                                 )
-                            )
+                                geometricCandidateSource = "stableCorners"
 
-                        }
+                            }
                         else {
 
                             print("⚠️ 备用纸张定位无法校正，请在预览中手动调整")
@@ -1556,14 +1717,27 @@ class ScanProcessor {
 
                     }
 
+                    if let preferredCoverage,
+                       preferredNeedsCompletenessConfirmation {
+                        RecognitionLogStore.shared.add(
+                            category:"裁切完整性复检",
+                            message:"小面积稳定定位不作为完整纸张证据",
+                            details:String(
+                                format:"稳定定位画面占比 %.1f%%，转入外围与文字证据复检",
+                                preferredCoverage * 100
+                            )
+                        )
+                    }
+
 
                     // 只有严格识别和连续帧定位均未成功时，才运行宽松兜底。
-                    if case nil = detectedCorners,
-                       RecognitionSettings.smallDocumentFallbackEnabled {
+                        if case nil = detectedCorners,
+                           RecognitionSettings.smallDocumentFallbackEnabled {
 
                         var fallback = self.detectSmallDocument(
                             in:cgImage
                         )
+                        geometricCandidateSource = "fallback:\(fallback.detectionSource)"
 
                         if fallback.selectedRectangles.isEmpty {
                             let enhanced = self.detectEnhancedDocument(
@@ -1585,16 +1759,26 @@ class ScanProcessor {
                                 textObservationCount:
                                     fallback.textObservationCount,
                                 textObservations:
-                                    fallback.textObservations,
+                                fallback.textObservations,
                                 detectionSource:
                                     enhanced.detectionSource,
                                 selectionReason:
-                                    enhanced.selectionReason
+                                    enhanced.selectionReason,
+                                hasCompletePageEvidence:
+                                    enhanced.hasCompletePageEvidence,
+                                completenessEvidenceSource:
+                                    enhanced.completenessEvidenceSource
                             )
+                            geometricCandidateSource =
+                                "fallback:\(enhanced.detectionSource)"
                         }
 
                         suggestedCropCorners = fallback
                             .suggestedCropCorners
+                        smallCandidateCompletenessConfirmed =
+                            fallback.hasCompletePageEvidence
+                        completenessEvidenceSource =
+                            fallback.completenessEvidenceSource
 
                         if fallback.selectedRectangles.count == 2,
                            let mergedCorners = DocumentRectangleSelector
@@ -1612,6 +1796,9 @@ class ScanProcessor {
                                ) {
                                 detectedCorners = selectedCorners
                                 result = corrected
+                                requiresExplicitCompletenessEvidence = true
+                                smallCandidateCompletenessConfirmed =
+                                    fallback.hasCompletePageEvidence
 
                                 print("✅ 识别到摊开书本，已忽略中缝并合并外框")
 
@@ -1657,6 +1844,9 @@ class ScanProcessor {
                             ) {
                                 detectedCorners = selectedCorners
                                 result = corrected
+                                requiresExplicitCompletenessEvidence = true
+                                smallCandidateCompletenessConfirmed =
+                                    fallback.hasCompletePageEvidence
 
                                 print("✅ 书页/小文档兜底识别成功")
 
@@ -1727,11 +1917,148 @@ class ScanProcessor {
                 }
 
 
+                // Every automatic path (strict, stable preview, book merge and
+                // small-document fallback) must pass the same post-correction
+                // geometry gate. Vision confidence describes the detected
+                // rectangle, not whether it is the complete page. The previous
+                // strict path could therefore accept a 7% crop enlarged 1.6x.
+                if let automaticCorners = detectedCorners {
+                    let geometryAnalyzer = GeometryQualityAnalyzer()
+                    let geometry = geometryAnalyzer.analyze(
+                        corners:automaticCorners,
+                        sourceImage:fixed,
+                        outputImage:result,
+                        cropMargin:0
+                    )
+                    let stableReferenceCorners:ScanCorners?
+                    if let preferredCorners,
+                       self.cornersAreUsable(preferredCorners) {
+                        stableReferenceCorners = self.insetCorners(
+                            preferredCorners
+                        )
+                    }
+                    else {
+                        stableReferenceCorners = nil
+                    }
+                    let cropSafety = geometryAnalyzer.assessAutomaticCrop(
+                        geometry,
+                        stableReferenceCorners:stableReferenceCorners,
+                        smallCandidateCompletenessConfirmed:
+                            smallCandidateCompletenessConfirmed,
+                        requiresExplicitCompletenessEvidence:
+                            requiresExplicitCompletenessEvidence
+                    )
+
+                    if !cropSafety.isSafe {
+                        let referenceCoverage = cropSafety
+                            .referenceCoverage.map {
+                                String(format:"%.1f%%", $0 * 100)
+                            } ?? "--"
+                        let firstRejectMetric = cropSafety
+                            .firstRejectedMetric ?? "none"
+                        let firstRejectValue = cropSafety
+                            .firstRejectedMetricValue.map {
+                                String(format:"%.4f", $0)
+                            } ?? "--"
+                        let firstRejectThreshold = cropSafety
+                            .firstRejectedMetricThreshold.map {
+                                String(format:"%.4f", $0)
+                            } ?? "--"
+                        let rejectedDetails = self
+                            .automaticCropGeometryDetails(geometry)
+                            + "; baseGeometrySafe="
+                            + (cropSafety.baseGeometrySafe ? "yes" : "no")
+                            + "; minimumCoverage="
+                            + String(
+                                format:"%.1f%%",
+                                cropSafety.minimumCoverage * 100
+                            )
+                            + "; stableReferenceCoverage="
+                            + referenceCoverage
+                            + "; completenessConfirmed="
+                            + (cropSafety.completenessConfirmed
+                                ? "yes" : "no")
+                            + "; candidateSource="
+                            + geometricCandidateSource
+                            + "; completenessEvidence="
+                            + (smallCandidateCompletenessConfirmed
+                                ? "yes" : "no")
+                            + "; completenessEvidenceRequired="
+                            + (requiresExplicitCompletenessEvidence
+                                ? "yes" : "no")
+                            + "; completenessEvidenceSource="
+                            + completenessEvidenceSource
+                            + "; firstRejectMetric="
+                            + firstRejectMetric
+                            + "; firstRejectValue="
+                            + firstRejectValue
+                            + "; firstRejectThreshold="
+                            + firstRejectThreshold
+                        var recoveredWithStableCorners = false
+
+                        if let stableCorners = stableReferenceCorners {
+                            if let stableImage = self.correct(
+                                image:fixed,
+                                corners:stableCorners
+                            ) {
+                                let stableGeometry = geometryAnalyzer.analyze(
+                                    corners:stableCorners,
+                                    sourceImage:fixed,
+                                    outputImage:stableImage,
+                                    cropMargin:0
+                                )
+                                let stableSafety = geometryAnalyzer
+                                    .assessAutomaticCrop(
+                                        stableGeometry,
+                                        stableReferenceCorners:nil,
+                                        smallCandidateCompletenessConfirmed:
+                                            false
+                                    )
+                                if stableSafety.isSafe {
+                                    result = stableImage
+                                    detectedCorners = stableCorners
+                                    allowsAlternateRecoveryCorners = false
+                                    recoveredWithStableCorners = true
+                                    RecognitionLogStore.shared.add(
+                                        level:"警告",
+                                        category:"裁切安全检查",
+                                        message:"严格或兜底裁切不安全，已回退拍摄前稳定定位",
+                                        details:rejectedDetails
+                                            + "; recoveredWithStableCorners=yes"
+                                            + "; finalKeepFullImage=no"
+                                            + "；稳定定位 "
+                                            + self.automaticCropGeometryDetails(
+                                                stableGeometry
+                                            )
+                                    )
+                                }
+                            }
+                        }
+
+                        if !recoveredWithStableCorners {
+                            result = fixed
+                            detectedCorners = nil
+                            allowsAlternateRecoveryCorners = false
+                            RecognitionLogStore.shared.add(
+                                level:"警告",
+                                category:"裁切安全检查",
+                                message:"自动裁切范围过小或几何不安全，已保留完整原图",
+                                details:rejectedDetails
+                                    + "; recoveredWithStableCorners=no"
+                                    + "; finalKeepFullImage=yes"
+                            )
+                        }
+                    }
+                }
+
+
                 SmartDocumentRecovery.process(
                     sourceImage:fixed,
                     currentImage:result,
                     currentCorners:detectedCorners,
-                    stableCorners:preferredCorners,
+                    stableCorners:preferredCorners.flatMap {
+                        self.cornerCoverage($0) >= 0.25 ? $0 : nil
+                    },
                     stability:preferredCornerStability,
                     allowsAlternateCorners:
                         allowsAlternateRecoveryCorners,
@@ -1743,26 +2070,76 @@ class ScanProcessor {
                         )
                     }
                 ) { recoveryOutput in
-                    DispatchQueue.global(qos:.utility).async {
-                        ColorTemperatureDiagnostics.analyzeAndRecord(
-                            image:recoveryOutput.image,
-                            blocks:recoveryOutput.enhancementSeed?
-                                .ocrResult.blocks ?? [],
-                            pageNumber:pageNumber
-                        )
-                    }
                     self.queue.async {
                         autoreleasepool {
+                            let contentOutput =
+                                DocumentContentPreflightAnalyzer
+                                    .analyzeAndOrient(
+                                        image:recoveryOutput.image,
+                                        pageNumber:pageNumber
+                                    )
+                            let rotationQuarterTurns = contentOutput
+                                .rotationQuarterTurns
+                            let orientedOriginal =
+                                DocumentContentPreflightAnalyzer.rotate(
+                                    fixed,
+                                    clockwiseQuarterTurns:
+                                        rotationQuarterTurns
+                                )
+                            let selectedCorners = recoveryOutput.corners
+                                ?? detectedCorners
+                            let orientedCorners = selectedCorners.map {
+                                DocumentContentPreflightAnalyzer.rotated(
+                                    $0,
+                                    clockwiseQuarterTurns:
+                                        rotationQuarterTurns
+                                )
+                            }
+                            let orientedSuggestedCorners =
+                                suggestedCropCorners.map {
+                                    DocumentContentPreflightAnalyzer.rotated(
+                                        $0,
+                                        clockwiseQuarterTurns:
+                                            rotationQuarterTurns
+                                    )
+                                }
+                            let existingSeed = rotationQuarterTurns != 0
+                                ? nil : recoveryOutput.enhancementSeed
+                            let pixelWidth = contentOutput.image.cgImage?
+                                .width
+                                ?? Int(
+                                    contentOutput.image.size.width
+                                        * contentOutput.image.scale
+                                )
+                            let pixelHeight = contentOutput.image.cgImage?
+                                .height
+                                ?? Int(
+                                    contentOutput.image.size.height
+                                        * contentOutput.image.scale
+                                )
+                            let enhancementSeed = SmartEnhancementSeed(
+                                ocrResult:existingSeed?.ocrResult,
+                                quality:existingSeed?.quality,
+                                contentPreflight:contentOutput.result,
+                                sourcePixelWidth:pixelWidth,
+                                sourcePixelHeight:pixelHeight
+                            )
+                            DispatchQueue.global(qos:.utility).async {
+                                ColorTemperatureDiagnostics
+                                    .analyzeAndRecord(
+                                        image:contentOutput.image,
+                                        blocks:contentOutput.result.blocks,
+                                        pageNumber:pageNumber
+                                    )
+                            }
                             let page = self.makeScanPage(
-                                originalImage:fixed,
-                                adjustedImage:recoveryOutput.image,
-                                detectedCorners:
-                                    recoveryOutput.corners
-                                        ?? detectedCorners,
+                                originalImage:orientedOriginal,
+                                adjustedImage:contentOutput.image,
+                                detectedCorners:orientedCorners,
                                 suggestedCropCorners:
-                                    suggestedCropCorners,
+                                    orientedSuggestedCorners,
                                 smartEnhancementSeed:
-                                    recoveryOutput.enhancementSeed
+                                    enhancementSeed
                             )
 
                             DispatchQueue.main.async {
@@ -1832,12 +2209,16 @@ class ScanProcessor {
                                     + enhanced.rectangleCandidateCount,
                             textObservationCount:
                                 fallback.textObservationCount,
-                            textObservations:
+                                textObservations:
                                 fallback.textObservations,
                             detectionSource:
                                 enhanced.detectionSource,
                             selectionReason:
-                                enhanced.selectionReason
+                                enhanced.selectionReason,
+                            hasCompletePageEvidence:
+                                enhanced.hasCompletePageEvidence,
+                            completenessEvidenceSource:
+                                enhanced.completenessEvidenceSource
                         )
                     }
 
@@ -2021,7 +2402,10 @@ class ScanProcessor {
                 textObservationCount:texts.count,
                 textObservations:texts,
                 detectionSource:"原图兜底",
-                selectionReason:selection.reason
+                selectionReason:selection.reason,
+                hasCompletePageEvidence:selection.hasCompletePageEvidence,
+                completenessEvidenceSource:
+                    selection.completenessEvidenceSource
             )
         }
         catch {
@@ -2039,7 +2423,9 @@ class ScanProcessor {
                 textObservationCount:0,
                 textObservations:[],
                 detectionSource:"原图兜底",
-                selectionReason:"宽松识别请求失败"
+                selectionReason:"宽松识别请求失败",
+                hasCompletePageEvidence:false,
+                completenessEvidenceSource:"none"
             )
         }
     }
@@ -2122,7 +2508,9 @@ class ScanProcessor {
             textObservationCount:textObservations.count,
             textObservations:textObservations,
             detectionSource:detectionSource,
-            selectionReason:selection.reason
+            selectionReason:selection.reason,
+            hasCompletePageEvidence:selection.hasCompletePageEvidence,
+            completenessEvidenceSource:selection.completenessEvidenceSource
         )
     }
 
@@ -2323,6 +2711,16 @@ class ScanProcessor {
     private func cornerDiagnosticDetails(
         _ corners:ScanCorners
     )->String {
+        L10n.format(
+            "画面占比 %.1f%%",
+            cornerCoverage(corners) * 100
+        )
+    }
+
+
+    private func cornerCoverage(
+        _ corners:ScanCorners
+    )->CGFloat {
         let points = [
             corners.topLeft,
             corners.topRight,
@@ -2337,10 +2735,21 @@ class ScanProcessor {
                 - next.x * points[index].y
         }
 
-        return L10n.format(
-            "画面占比 %.1f%%",
-            abs(area) * 50
-        )
+        return abs(area) / 2
+    }
+
+
+    private func automaticCropGeometryDetails(
+        _ geometry:RecoveryGeometryMetrics
+    )->String {
+        [
+            "coverage=\(String(format:"%.1f%%", geometry.documentCoverage * 100))",
+            "perspective=\(String(format:"%.3f", geometry.perspectiveSeverity))",
+            "topBottom=\(String(format:"%.3f", geometry.topBottomWidthRatio))",
+            "leftRight=\(String(format:"%.3f", geometry.leftRightHeightRatio))",
+            "outputScale=\(String(format:"%.3f", geometry.outputScale))",
+            "edgeSafety=\(String(format:"%.1f%%", geometry.edgeSafety * 100))"
+        ].joined(separator:"，")
     }
 
 

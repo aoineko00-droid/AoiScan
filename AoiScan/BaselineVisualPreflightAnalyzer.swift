@@ -54,7 +54,8 @@ struct BaselineVisualPreflightResult:Codable {
 enum BaselineVisualPreflightAnalyzer {
     static func analyze(
         image:UIImage,
-        captureCorners:ScanCorners? = nil
+        captureCorners:ScanCorners? = nil,
+        precomputedTextRectangles:[CGRect]? = nil
     )->BaselineVisualPreflightResult {
         let startedAt = Date()
         let frame = CaptureFrameQualityAnalyzer.analyze(
@@ -74,7 +75,8 @@ enum BaselineVisualPreflightAnalyzer {
         let smallTextRisk = SmallTextRiskAnalyzer.analyze(
             image:image,
             corners:captureCorners,
-            visualQuality:frame
+            visualQuality:frame,
+            precomputedTextRectangles:precomputedTextRectangles
         )
 
         let dimensionsUsable = frame.pixelWidth >= 600

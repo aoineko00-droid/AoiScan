@@ -12,7 +12,8 @@ enum DocumentQualityRouter {
         quality:DocumentQualityScore,
         ocrQuality:OCRQualityResult,
         blocks:[OCRBlock],
-        perspectiveSeverity:Float? = nil
+        perspectiveSeverity:Float? = nil,
+        colorTemperature:ColorTemperatureResult? = nil
     )->DocumentQualityRoute {
         guard ocrQuality.qualityLevel != .insufficientText,
               blocks.count >= 2 else {
@@ -30,6 +31,49 @@ enum DocumentQualityRouter {
         }
 
         let visual = quality.visual
+        // Scanner-style paper normalization owns ordinary illumination falloff
+        // on light, low-saturation pages. Route it before generic shadow
+        // recovery so one W candidate can neutralize and flatten the complete
+        // sheet instead of correcting only a local dark area first.
+        if let colorTemperature,
+           DocumentPaperNormalizer.isEligible(colorTemperature) {
+            let darkestPaper = min(
+                visual.topBrightness,
+                visual.middleBrightness,
+                visual.bottomBrightness
+            )
+            let spatialNeed = visual.illuminationGradient >= 0.025
+                || darkestPaper < 0.965
+            let tonalNeed = DocumentPaperNormalizer.needsNormalization(
+                colorTemperature
+            )
+            let surfaceSafeForPaperRoute = darkestPaper >= 0.78
+                && visual.shadowSeverity <= 0.28
+            if surfaceSafeForPaperRoute && (spatialNeed || tonalNeed) {
+                let brightnessNeed = min(
+                    max((0.985 - darkestPaper) / 0.16, 0),
+                    1
+                )
+                let gradientNeed = min(
+                    visual.illuminationGradient / 0.10,
+                    1
+                )
+                let neutralityNeed = min(
+                    max(abs(colorTemperature.labYellowBias) / 10, 0),
+                    1
+                )
+                return DocumentQualityRoute(
+                    primaryIssue:.colorTemperature,
+                    affectedRegion:.none,
+                    severity:max(
+                        max(brightnessNeed, gradientNeed),
+                        neutralityNeed
+                    ),
+                    reason:"浅色纸张进入整页扫描白底与低频光照标准化"
+                )
+            }
+        }
+
         // Normal lighting variation is diagnostic information, not a reason to
         // spend another full OCR pass. Only route genuinely strong problems.
         let strongGradient = visual.illuminationGradient >= 0.075
@@ -72,6 +116,57 @@ enum DocumentQualityRouter {
                     1
                 ),
                 reason:"背景均匀度与局部暗区同时达到背景恢复门槛"
+            )
+        }
+
+        // Color correction is intentionally last: a page with real shadow or
+        // background evidence must use the illumination route, never stack a
+        // white-balance candidate on the same pass. Dense pages also stay on
+        // the fast path to avoid another expensive OCR comparison.
+        if let colorTemperature,
+           colorTemperature.source == .warm
+                || colorTemperature.source == .cool,
+           colorTemperature.confidence >= 0.68,
+           colorTemperature.validSampleRatio >= 0.18,
+           !colorTemperature.possiblePaperColor {
+            let ratioEvidence:Float
+            let labEvidence:Float
+            switch colorTemperature.source {
+            case .warm:
+                ratioEvidence = max(
+                    (colorTemperature.redBlueRatio - 1.03) / 0.12,
+                    0
+                )
+                labEvidence = max(
+                    (colorTemperature.labYellowBias - 2) / 14,
+                    0
+                )
+            case .cool:
+                ratioEvidence = max(
+                    (0.98 - colorTemperature.redBlueRatio) / 0.12,
+                    0
+                )
+                labEvidence = max(
+                    (-colorTemperature.labYellowBias - 1.5) / 14,
+                    0
+                )
+            case .neutral, .uncertain:
+                ratioEvidence = 0
+                labEvidence = 0
+            }
+            let severity = min(
+                max(
+                    colorTemperature.confidence * 0.55
+                        + max(ratioEvidence, labEvidence) * 0.45,
+                    0
+                ),
+                1
+            )
+            return DocumentQualityRoute(
+                primaryIssue:.colorTemperature,
+                affectedRegion:.none,
+                severity:severity,
+                reason:"可信\(colorTemperature.source.diagnosticName)证据达到自动白平衡门槛"
             )
         }
 

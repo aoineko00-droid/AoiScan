@@ -12,6 +12,13 @@ struct AppSettingsView:View {
     @AppStorage(AppLanguage.storageKey)
     private var appLanguage = AppLanguage.simplifiedChinese.rawValue
 
+    @State private var languageSelection =
+        AppLanguage.current.rawValue
+
+    @State private var pendingLanguage:String?
+
+    @State private var showLanguageConfirmation = false
+
     @AppStorage("recognition.smallDocumentFallback")
     private var smallDocumentFallbackEnabled = true
 
@@ -39,7 +46,7 @@ struct AppSettingsView:View {
             Section("语言") {
                 Picker(
                     "界面语言",
-                    selection:$appLanguage
+                    selection:$languageSelection
                 ) {
                     ForEach(AppLanguage.allCases) { language in
                         Text(language.displayName)
@@ -49,7 +56,7 @@ struct AppSettingsView:View {
                 .pickerStyle(.segmented)
 
                 Text(
-                    "选择后会立即切换 AoiScan 自有界面的语言。系统分享菜单、键盘和权限弹窗仍跟随 iOS 的语言设置。"
+                    "选择新语言后，点击“确定”将重新载入 AoiScan 并返回主页面。系统分享菜单、键盘和权限弹窗仍跟随 iOS 的语言设置。"
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -219,6 +226,32 @@ struct AppSettingsView:View {
         }
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of:languageSelection) { _, newValue in
+            guard newValue != appLanguage else { return }
+            pendingLanguage = newValue
+            showLanguageConfirmation = true
+        }
+        .alert(
+            L10n.text("切换界面语言"),
+            isPresented:$showLanguageConfirmation
+        ) {
+            Button(L10n.text("取消"), role:.cancel) {
+                languageSelection = appLanguage
+                pendingLanguage = nil
+            }
+
+            Button(L10n.text("确定")) {
+                guard let pendingLanguage else { return }
+                self.pendingLanguage = nil
+                appLanguage = pendingLanguage
+            }
+        } message: {
+            Text(
+                L10n.text(
+                    "确定切换界面语言吗？AoiScan 将重新载入并返回主页面。"
+                )
+            )
+        }
         .onChange(
             of:automaticTextIndexEnabled
         ) { _, enabled in

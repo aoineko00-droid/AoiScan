@@ -40,8 +40,10 @@ enum ColorTemperatureAnalyzer {
                 ? (maximum - minimum) / maximum : 0
             let luminance = 0.2126 * pixel.r
                 + 0.7152 * pixel.g + 0.0722 * pixel.b
+            // Scanner-white paper is a valid background sample. Excluding
+            // values above 0.995 made a successful white-paper candidate look
+            // as if it had lost all usable background evidence.
             guard luminance >= 0.48,
-                  luminance <= 0.995,
                   saturation <= 0.30 else { continue }
             paperPixels.append(pixel)
         }
@@ -70,36 +72,40 @@ enum ColorTemperatureAnalyzer {
         let possiblePaperColor = saturation >= 0.12
             || sampleRatio < 0.08
 
-        let warmEvidence = max(
-            (ratio - 1.06) / 0.16,
-            (yellowBias - 5) / 16
-        )
-        let coolEvidence = max(
-            (0.96 - ratio) / 0.14,
-            (-yellowBias - 3) / 14
-        )
+        // Ratio and Lab evidence must agree. The former max-only rule needed
+        // an extreme cast before confidence could reach the router threshold,
+        // so ordinary indoor warm light was always neutral or
+        // uncertain even when both metrics consistently leaned yellow.
+        let warmRatioEvidence = min(max((ratio - 1.03) / 0.09, 0), 1)
+        let warmLabEvidence = min(max((yellowBias - 2) / 10, 0), 1)
+        let warmEvidence = warmRatioEvidence * 0.55
+            + warmLabEvidence * 0.45
+        let coolRatioEvidence = min(max((0.98 - ratio) / 0.09, 0), 1)
+        let coolLabEvidence = min(max((-yellowBias - 1.5) / 10, 0), 1)
+        let coolEvidence = coolRatioEvidence * 0.55
+            + coolLabEvidence * 0.45
         let source:DocumentLightSource
         let rawConfidence:Float
-        if warmEvidence >= 0.35,
-           ratio >= 1.07,
-           yellowBias >= 4 {
+        if warmEvidence >= 0.25,
+           ratio >= 1.045,
+           yellowBias >= 3 {
             source = .warm
-            rawConfidence = warmEvidence
+            rawConfidence = min(0.62 + warmEvidence * 0.33, 0.95)
         }
-        else if coolEvidence >= 0.35,
-                ratio <= 0.96,
-                yellowBias <= -2 {
+        else if coolEvidence >= 0.25,
+                ratio <= 0.965,
+                yellowBias <= -2.5 {
             source = .cool
-            rawConfidence = coolEvidence
+            rawConfidence = min(0.62 + coolEvidence * 0.33, 0.95)
         }
-        else if abs(ratio - 1) <= 0.07,
-                abs(yellowBias) <= 7 {
+        else if abs(ratio - 1) <= 0.04,
+                abs(yellowBias) <= 3 {
             source = .neutral
-            rawConfidence = 0.70
+            rawConfidence = 0.72
         }
         else {
             source = .uncertain
-            rawConfidence = 0.35
+            rawConfidence = 0.42
         }
         let sampleConfidence = min(sampleRatio / 0.18, 1)
         let paperPenalty:Float = possiblePaperColor ? 0.62 : 1

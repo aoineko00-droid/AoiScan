@@ -13,6 +13,11 @@ enum SmartEnhancementExperiment {
             parameters:.smartColorMedium
         )
     ]
+    private static let whiteBalanceCandidate =
+        EnhancementExperimentCandidate(
+            variant:.whiteBalance,
+            parameters:.baseline
+        )
 
     static func route(
         for quality:OCRQualityResult
@@ -38,6 +43,8 @@ enum SmartEnhancementExperiment {
             return []
         case .lighting, .regionalSharpness, .background:
             return candidates
+        case .colorTemperature:
+            return [whiteBalanceCandidate]
         }
     }
 

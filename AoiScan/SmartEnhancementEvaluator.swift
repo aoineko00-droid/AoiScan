@@ -12,7 +12,8 @@ struct SmartEnhancementEvaluator {
         enhanced:OCRQualityResult,
         originalDocument:DocumentQualityScore,
         enhancedDocument:DocumentQualityScore,
-        route:DocumentQualityRoute
+        route:DocumentQualityRoute,
+        whiteBalanceEvaluation:WhiteBalanceEvaluationResult? = nil
     )->SmartEnhancementDecision {
         let characterRetention = retention(
             enhanced.recognizedCharacterCount,
@@ -74,12 +75,14 @@ struct SmartEnhancementEvaluator {
         let targetImproved = problemSpecificImprovement(
             route:route,
             original:originalDocument,
-            enhanced:enhancedDocument
+            enhanced:enhancedDocument,
+            whiteBalanceEvaluation:whiteBalanceEvaluation
         )
         let visualSafetyPassed = problemNotWorse(
             route:route,
             original:originalDocument,
-            enhanced:enhancedDocument
+            enhanced:enhancedDocument,
+            whiteBalanceEvaluation:whiteBalanceEvaluation
         )
             && enhancedDocument.visual.haloPenalty
                 <= originalDocument.visual.haloPenalty + 0.025
@@ -132,7 +135,8 @@ struct SmartEnhancementEvaluator {
     private func problemNotWorse(
         route:DocumentQualityRoute,
         original:DocumentQualityScore,
-        enhanced:DocumentQualityScore
+        enhanced:DocumentQualityScore,
+        whiteBalanceEvaluation:WhiteBalanceEvaluationResult?
     )->Bool {
         switch route.primaryIssue {
         case .regionalSharpness:
@@ -143,6 +147,16 @@ struct SmartEnhancementEvaluator {
                     <= original.visual.illuminationGradient + 0.005
                 && enhanced.visual.shadowSeverity
                     <= original.visual.shadowSeverity + 0.015
+                && enhanced.visual.textStructureScore
+                    >= original.visual.textStructureScore - 0.010
+        case .colorTemperature:
+            return whiteBalanceEvaluation?.accepted == true
+                && enhanced.visual.backgroundUniformity
+                    >= original.visual.backgroundUniformity - 0.008
+                && enhanced.visual.shadowSeverity
+                    <= original.visual.shadowSeverity + 0.012
+                && enhanced.visual.textStructureScore
+                    >= original.visual.textStructureScore - 0.015
         case .none, .perspective:
             return false
         }
@@ -151,7 +165,8 @@ struct SmartEnhancementEvaluator {
     private func problemSpecificImprovement(
         route:DocumentQualityRoute,
         original:DocumentQualityScore,
-        enhanced:DocumentQualityScore
+        enhanced:DocumentQualityScore,
+        whiteBalanceEvaluation:WhiteBalanceEvaluationResult?
     )->Bool {
         switch route.primaryIssue {
         case .regionalSharpness:
@@ -168,7 +183,7 @@ struct SmartEnhancementEvaluator {
                     >= original.visual.regionalClarityBalance + 0.015
         case .lighting, .background:
             let minimumShadowReduction = max(
-                0.012,
+                0.025,
                 original.visual.shadowSeverity * 0.12
             )
             let shadowImproved = original.visual.shadowSeverity >= 0.080
@@ -177,9 +192,11 @@ struct SmartEnhancementEvaluator {
                         - minimumShadowReduction
             return shadowImproved
                 || enhanced.visual.illuminationGradient
-                    <= original.visual.illuminationGradient - 0.006
+                    <= original.visual.illuminationGradient - 0.018
                 || enhanced.backgroundUniformity
-                    >= original.backgroundUniformity + 0.012
+                    >= original.backgroundUniformity + 0.018
+        case .colorTemperature:
+            return whiteBalanceEvaluation?.accepted == true
         case .none, .perspective:
             return false
         }

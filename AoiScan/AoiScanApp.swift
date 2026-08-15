@@ -28,6 +28,7 @@ struct AoiScanApp: App {
         WindowGroup {
             
             ContentView()
+                .id(appLanguage)
                 .environment(
                     \.locale,
                     selectedLanguage.locale

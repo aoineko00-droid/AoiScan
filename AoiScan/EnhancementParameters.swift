@@ -11,6 +11,7 @@ enum EnhancementExperimentVariant:String,Codable,CaseIterable {
     case baseline = "A"
     case smartColorMedium = "B"
     case smartColorStrong = "C"
+    case whiteBalance = "W"
 
     var diagnosticName:String {
         switch self {
@@ -20,6 +21,8 @@ enum EnhancementExperimentVariant:String,Codable,CaseIterable {
             return "问题定向恢复"
         case .smartColorStrong:
             return "光照均衡与文字保护"
+        case .whiteBalance:
+            return "自动白平衡候选"
         }
     }
 }
@@ -103,6 +106,8 @@ struct EnhancementTrialSummary:Codable {
     let evaluatorAccepted:Bool
     let colorRetention:ColorRetentionResult?
     let documentQuality:DocumentQualityScore?
+    let colorTemperature:ColorTemperatureResult?
+    let whiteBalanceEvaluation:WhiteBalanceEvaluationResult?
     let reusedBaselineOCR:Bool
     let preflight:EnhancementPreflightResult?
     let secondOCRPerformed:Bool

@@ -33,7 +33,7 @@ enum ColorTemperatureDiagnostics {
             String(format:"背景饱和度 %.1f%%", result.backgroundSaturation * 100),
             String(format:"有效背景样本 %.1f%%", result.validSampleRatio * 100),
             L10n.format("可能为纸张本色 %@", result.possiblePaperColor ? "是" : "否"),
-            "仅记录诊断，未执行白平衡或色温修正"
+            "本次检测仅记录；是否修正由智能增强质量路由决定"
         ].joined(separator:"\n")
         record(
             message:"检测到\(L10n.text(result.source.diagnosticName))",

@@ -12,6 +12,7 @@ enum DocumentQualityIssue:String,Codable {
     case regionalSharpness
     case perspective
     case background
+    case colorTemperature
 
     var diagnosticName:String {
         switch self {
@@ -20,6 +21,7 @@ enum DocumentQualityIssue:String,Codable {
         case .regionalSharpness: return "区域清晰度问题"
         case .perspective: return "透视问题"
         case .background: return "背景不均问题"
+        case .colorTemperature: return "色温问题"
         }
     }
 }

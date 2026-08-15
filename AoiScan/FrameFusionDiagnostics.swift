@@ -35,8 +35,8 @@ enum FrameFusionDiagnostics {
                 L10n.text(result.currentResolutionEligible ? "是" : "否")
             ),
             "缓存用途 仅诊断，不参与正式照片替换或融合",
-            "缓存内存 (storageMegabytes(result)) MB",
-            "降级帧 (fallbackFrameCount(result)) 个",
+            "缓存内存 \(storageMegabytes(result)) MB",
+            "降级帧 \(fallbackFrameCount(result)) 个",
             L10n.format(
                 "分析耗时 %@ms",
                 String(result.analysisMilliseconds)

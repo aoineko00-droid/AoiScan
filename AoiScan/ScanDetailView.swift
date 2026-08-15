@@ -27,6 +27,7 @@ struct ScanDetailView: View {
     @State private var displayImageURLs:[URL] = []
     @State private var detectedCorners:[ScanCorners?] = []
     @State private var pageFilters:[ScanPageFilter] = []
+    @State private var userConfirmedOrientations:[Bool] = []
     
     @State private var showRenameAlert = false
     @State private var showDeleteAlert = false
@@ -34,13 +35,20 @@ struct ScanDetailView: View {
     @State private var newName = ""
     
     @State private var shareItem: ShareItem?
+    @State private var isPreparingShare = false
     @State private var isExportingWord = false
-    @State private var showWordExportError = false
-    @State private var wordExportError = ""
+    @State private var showExportError = false
+    @State private var exportErrorMessage = ""
     
     @State private var showFilterMenu = false
     @State private var showCropSheet = false
     @State private var showTextRecognition = false
+    @State private var showAppendScanner = false
+    @State private var showAppendPreview = false
+    @State private var appendedPages:[ScanPage] = []
+    @State private var showPageOverview = false
+    @State private var isPerformingPageOperation = false
+    @State private var pageOperationErrorMessage:String?
     
     @State private var currentPage = 0
     @State private var detailEnhancementTokens:[Int:UUID] = [:]
@@ -54,264 +62,16 @@ struct ScanDetailView: View {
     
     
     var body: some View {
-        
-        VStack {
-            
-            ScrollView {
-                
-                VStack(spacing:20) {
-                    
-                    Text(
-                        document.title ?? L10n.text("扫描文档")
-                    )
-                    .font(.title2)
-                    .bold()
-                    
-                    
-                    if let date = document.createdAt {
-                        
-                        Text(
-                            Self.formattedDate(date)
-                        )
-                        .foregroundColor(.gray)
-                        
-                    }
-                    
-                    
-                    Divider()
-                    
-                    
-                    if displayImages.isEmpty {
-                        
-                        ProgressView()
-                        
-                    }
-                    else {
-                        
-                        TabView(
-                            selection:$currentPage
-                        ) {
-                            
-                            ForEach(
-                                0..<displayImages.count,
-                                id:\.self
-                            ) { index in
-                                
-                                ZoomableImageView(
-                                    image:displayImages[index]
-                                )
-                                .clipShape(
-                                    RoundedRectangle(
-                                        cornerRadius:12
-                                    )
-                                )
-                                .id(index)
-                                .tag(index)
-                                
-                            }
-                            
-                        }
-                        .frame(height:420)
-                        .tabViewStyle(.page)
-                        .overlay(alignment:.bottom) {
-                            if showDetailEnhancementBanner {
-                                detailEnhancementBanner
-                                    .padding(.bottom,28)
-                                    .transition(
-                                        .opacity.combined(
-                                            with:.move(edge:.bottom)
-                                        )
-                                    )
-                            }
-                        }
-                        
-                    }
-                    
-                }
-                .padding()
-                
-            }
-            
-            
-            HStack(spacing:40) {
-                
-                
-                Button {
-                    
-                    showFilterMenu = true
-                    
-                } label:{
-                    
-                    Image(
-                        systemName:
-                            "circle.lefthalf.filled"
-                    )
-                    .font(.title2)
-                    .padding(14)
-                    .background(
-                        Color.blue.opacity(0.2)
-                    )
-                    .cornerRadius(16)
-                    
-                }
-                
-                
-                
-                Button {
-
-                    if displayImages.indices.contains(
-                        currentPage
-                    ) {
-
-                        showCropSheet = true
-
-                    }
-                    
-                } label:{
-                    
-                    Image(
-                        systemName:
-                            "crop"
-                    )
-                    .font(.title2)
-                    .padding(14)
-                    .background(
-                        Color.green.opacity(0.2)
-                    )
-                    .cornerRadius(16)
-                    
-                }
-                .disabled(displayImages.isEmpty)
-
-
-
-                Button {
-
-                    if imageForTextRecognition(
-                        at:currentPage
-                    ) != nil {
-
-                        showTextRecognition = true
-
-                    }
-
-                } label:{
-
-                    Image(
-                        systemName:
-                            "text.viewfinder"
-                    )
-                    .font(.title2)
-                    .padding(14)
-                    .background(
-                        Color.orange.opacity(0.2)
-                    )
-                    .cornerRadius(16)
-
-                }
-                .disabled(displayImages.isEmpty)
-                
-                
-            }
-            .padding(.bottom,30)
-            .disabled(isDetailSmartEnhancing)
-            
+        documentPreview
+        .safeAreaInset(edge:.bottom, spacing:0) {
+            detailActionBar
         }
-        .navigationTitle("扫描详情")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            
-            ToolbarItemGroup(
-                placement:.navigationBarTrailing
-            ){
-                
-                
-                Button {
-                    
-                    newName =
-                    document.title ?? ""
-                    
-                    showRenameAlert = true
-                    
-                } label:{
-                    
-                    Label(
-                        "重命名",
-                        systemImage:"pencil"
-                    )
-                    
-                }
-                
-                
-                
-                Button(
-                    role:.destructive
-                ){
-                    
-                    showDeleteAlert = true
-                    
-                } label:{
-                    
-                    Label(
-                        "删除",
-                        systemImage:"trash"
-                    )
-                    
-                }
-                
-                
-                
-                Menu {
-
-                    Button {
-
-                        guard let url = generatePDF(
-                            for:document
-                        ) else {
-                            print("PDF生成失败")
-                            return
-                        }
-
-                        shareItem = ShareItem(url:url)
-
-                    } label: {
-
-                        Label(
-                            "分享PDF",
-                            systemImage:"doc.richtext"
-                        )
-
-                    }
-
-
-                    Button {
-
-                        exportWordDocument()
-
-                    } label: {
-
-                        Label(
-                            "导出 Word",
-                            systemImage:"doc.badge.arrow.up"
-                        )
-
-                    }
-                    .disabled(isExportingWord)
-
-                } label:{
-
-                    Label(
-                        isExportingWord
-                            ? L10n.text("正在导出 Word…")
-                            : L10n.text("分享"),
-                        systemImage:"square.and.arrow.up"
-                    )
-
-                }
-                
-                
+            ToolbarItem(placement:.principal) {
+                detailNavigationHeader
             }
-            
         }
 
 
@@ -347,6 +107,52 @@ struct ScanDetailView: View {
 
             }
 
+        }
+
+        .sheet(isPresented:$showAppendScanner) {
+            if showAppendPreview {
+                ScanPreviewView(
+                    pages:appendedPages,
+                    appendDocumentID:document.id
+                ) { firstAddedPageIndex in
+                    loadImages()
+                    currentPage = min(
+                        firstAddedPageIndex,
+                        max(displayImages.count - 1, 0)
+                    )
+                }
+            }
+            else {
+                CameraScannerView(
+                    pages:$appendedPages,
+                    showPreview:$showAppendPreview
+                )
+            }
+        }
+
+        .sheet(isPresented:$showPageOverview) {
+            ScanPageOverviewView(
+                items:pageOverviewItems,
+                currentPageNumber:currentPage + 1
+            ) { selectedPageNumber in
+                currentPage = max(
+                    0,
+                    min(
+                        selectedPageNumber - 1,
+                        displayImages.count - 1
+                    )
+                )
+            } onCommit: { order in
+                let selectedPageNumber = currentPage + 1
+                try await ScanManager.shared.reorderPages(
+                    order,
+                    in:document
+                )
+                loadImages()
+                currentPage = order.firstIndex(
+                    of:selectedPageNumber
+                ) ?? 0
+            }
         }
         
         
@@ -403,7 +209,7 @@ struct ScanDetailView: View {
         
         
         .alert(
-            "确定删除该文件？",
+            pageDeleteAlertTitle,
             isPresented:
                 $showDeleteAlert
         ){
@@ -413,13 +219,7 @@ struct ScanDetailView: View {
                 "删除",
                 role:.destructive
             ){
-                
-                ScanManager.shared.deleteDocument(
-                    document
-                )
-                
-                dismiss()
-                
+                deleteCurrentPage()
             }
             
             
@@ -431,20 +231,36 @@ struct ScanDetailView: View {
             }
             
             
+        } message: {
+            Text(pageDeleteAlertMessage)
         }
 
 
         .alert(
-            "Word 导出失败",
-            isPresented:$showWordExportError
+            L10n.text("导出失败"),
+            isPresented:$showExportError
         ) {
 
             Button("好", role:.cancel) {}
 
         } message: {
 
-            Text(wordExportError)
+            Text(exportErrorMessage)
 
+        }
+
+        .alert(
+            L10n.text("页面操作失败"),
+            isPresented:Binding(
+                get:{ pageOperationErrorMessage != nil },
+                set:{ if !$0 { pageOperationErrorMessage = nil } }
+            )
+        ) {
+            Button(L10n.text("好"), role:.cancel) {
+                pageOperationErrorMessage = nil
+            }
+        } message: {
+            Text(pageOperationErrorMessage ?? "")
         }
         
         
@@ -519,11 +335,407 @@ struct ScanDetailView: View {
         
         .sheet(item: $shareItem) { item in
             ShareSheet(
-                activityItems: [item.url]
+                activityItems:item.urls
             )
         }
         
         
+    }
+
+
+    private var detailNavigationHeader:some View {
+        HStack(spacing:8) {
+            Button {
+                newName = document.title ?? ""
+                showRenameAlert = true
+            } label: {
+                HStack(spacing:4) {
+                    Text(
+                        document.title
+                            ?? L10n.text("扫描文档")
+                    )
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                    Image(systemName:"pencil")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(
+                L10n.text("点击修改文件名")
+            )
+
+            if let date = document.createdAt {
+                Text(Self.formattedDate(date))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal:true, vertical:false)
+            }
+        }
+    }
+
+
+    private var documentPreview:some View {
+        ZStack {
+            RoundedRectangle(cornerRadius:14, style:.continuous)
+                .fill(Color(.secondarySystemBackground))
+
+            if displayImages.isEmpty {
+                ProgressView()
+            }
+            else {
+                TabView(selection:$currentPage) {
+                    ForEach(
+                        0..<displayImages.count,
+                        id:\.self
+                    ) { index in
+                        ZoomableImageView(
+                            image:displayImages[index]
+                        )
+                        .id(index)
+                        .tag(index)
+                    }
+                }
+                .tabViewStyle(
+                    .page(indexDisplayMode:.never)
+                )
+                .overlay(alignment:.bottom) {
+                    VStack(spacing:8) {
+                        if showDetailEnhancementBanner {
+                            detailEnhancementBanner
+                                .transition(
+                                    .opacity.combined(
+                                        with:.move(edge:.bottom)
+                                    )
+                                )
+                        }
+
+                        if displayImages.count > 1 {
+                            Text(
+                                "\(currentPage + 1) / "
+                                    + "\(displayImages.count)"
+                            )
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal,10)
+                            .padding(.vertical,5)
+                            .background(.thinMaterial)
+                            .clipShape(Capsule())
+                        }
+                    }
+                    .padding(.horizontal,12)
+                    .padding(.bottom,12)
+                }
+            }
+        }
+        .overlay(alignment:.topTrailing) {
+            if !displayImages.isEmpty {
+                documentPageControls
+                    .padding(12)
+            }
+        }
+        .clipShape(
+            RoundedRectangle(cornerRadius:14, style:.continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius:14, style:.continuous)
+                .stroke(
+                    Color.primary.opacity(0.08),
+                    lineWidth:0.5
+                )
+        }
+        .shadow(
+            color:Color.black.opacity(0.06),
+            radius:8,
+            x:0,
+            y:2
+        )
+        .padding(.horizontal,14)
+        .padding(.top,10)
+        .padding(.bottom,8)
+        .background(Color(.systemBackground))
+    }
+
+
+    private var detailActionBar:some View {
+        VStack(spacing:0) {
+            Divider()
+
+            HStack(spacing:0) {
+                Button {
+                    showFilterMenu = true
+                } label: {
+                    detailActionLabel(
+                        L10n.text("滤镜"),
+                        systemImage:"circle.lefthalf.filled"
+                    )
+                }
+                .frame(maxWidth:.infinity)
+                .disabled(
+                    displayImages.isEmpty
+                        || isDetailSmartEnhancing
+                )
+
+                Button {
+                    guard displayImages.indices.contains(
+                        currentPage
+                    ) else { return }
+                    showCropSheet = true
+                } label: {
+                    detailActionLabel(
+                        L10n.text("裁切"),
+                        systemImage:"crop"
+                    )
+                }
+                .frame(maxWidth:.infinity)
+                .disabled(
+                    displayImages.isEmpty
+                        || isDetailSmartEnhancing
+                )
+
+                Button {
+                    guard imageForTextRecognition(
+                        at:currentPage
+                    ) != nil else {
+                        return
+                    }
+                    showTextRecognition = true
+                } label: {
+                    detailActionLabel(
+                        L10n.text("识别"),
+                        systemImage:"text.viewfinder"
+                    )
+                }
+                .frame(maxWidth:.infinity)
+                .disabled(
+                    displayImages.isEmpty
+                        || isDetailSmartEnhancing
+                )
+
+                Menu {
+                    Button {
+                        sharePDFDocument()
+                    } label: {
+                        Label(
+                            "分享PDF",
+                            systemImage:"doc.richtext"
+                        )
+                    }
+                    .disabled(isPreparingShare)
+
+                    Button {
+                        shareJPGDocument()
+                    } label: {
+                        Label(
+                            L10n.text("分享 JPG"),
+                            systemImage:"photo.on.rectangle.angled"
+                        )
+                    }
+                    .disabled(isPreparingShare)
+
+                    Button {
+                        exportWordDocument()
+                    } label: {
+                        Label(
+                            "导出 Word",
+                            systemImage:"doc.badge.arrow.up"
+                        )
+                    }
+                    .disabled(
+                        isExportingWord
+                            || isPreparingShare
+                    )
+                } label: {
+                    detailActionLabel(
+                        L10n.text("分享"),
+                        systemImage:"square.and.arrow.up",
+                        isBusy:isPreparingShare
+                            || isExportingWord
+                    )
+                }
+                .frame(maxWidth:.infinity)
+
+                Button {
+                    appendedPages.removeAll()
+                    showAppendPreview = false
+                    showAppendScanner = true
+                } label: {
+                    detailActionLabel(
+                        L10n.text("添加"),
+                        systemImage:"camera"
+                    )
+                }
+                .frame(maxWidth:.infinity)
+                .disabled(isPerformingPageOperation)
+            }
+            .frame(maxWidth:640)
+            .padding(.horizontal,8)
+            .padding(.top,6)
+            .padding(.bottom,4)
+            .frame(maxWidth:.infinity)
+        }
+        .background(.ultraThinMaterial)
+    }
+
+
+    private var documentPageControls:some View {
+        HStack(spacing:0) {
+            Button {
+                showDeleteAlert = true
+            } label: {
+                Image(systemName:"trash")
+                    .font(.system(size:18, weight:.medium))
+                    .foregroundStyle(
+                        Color.primary.opacity(0.84)
+                    )
+                    .frame(width:40, height:40)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+                L10n.text("删除当前页")
+            )
+
+            Rectangle()
+                .fill(Color.primary.opacity(0.10))
+                .frame(width:0.5, height:20)
+                .accessibilityHidden(true)
+
+            Button {
+                showPageOverview = true
+            } label: {
+                Image(systemName:"square.grid.2x2")
+                    .font(.system(size:18, weight:.medium))
+                    .foregroundStyle(
+                        Color.primary.opacity(0.84)
+                    )
+                    .frame(width:40, height:40)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+                L10n.text("全部页面")
+            )
+        }
+        .background {
+            Capsule()
+                .fill(Color.white.opacity(0.72))
+        }
+        .overlay {
+            Capsule()
+                .stroke(
+                    Color.primary.opacity(0.08),
+                    lineWidth:0.5
+                )
+        }
+        .shadow(
+            color:Color.black.opacity(0.08),
+            radius:6,
+            x:0,
+            y:2
+        )
+        .opacity(isPerformingPageOperation ? 0.48 : 1)
+        .disabled(isPerformingPageOperation)
+    }
+
+
+    private func detailActionLabel(
+        _ title:String,
+        systemImage:String,
+        isBusy:Bool = false
+    )->some View {
+        VStack(spacing:4) {
+            Group {
+                if isBusy {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                else {
+                    Image(systemName:systemImage)
+                        .font(.system(size:21, weight:.regular))
+                }
+            }
+            .frame(height:24)
+
+            Text(title)
+                .font(.caption2)
+                .lineLimit(1)
+        }
+        .foregroundStyle(.primary)
+        .frame(maxWidth:.infinity, minHeight:50)
+        .contentShape(Rectangle())
+    }
+
+
+    private var pageOverviewItems:[ScanPageOverviewItem] {
+        displayImages.enumerated().map { index,image in
+            ScanPageOverviewItem(
+                pageNumber:index + 1,
+                image:image
+            )
+        }
+    }
+
+
+    private var pageDeleteAlertTitle:String {
+        if displayImages.count <= 1 {
+            return L10n.text("删除整个文档？")
+        }
+        return L10n.format(
+            "删除第 %@ 页？",
+            NSNumber(value:currentPage + 1)
+        )
+    }
+
+
+    private var pageDeleteAlertMessage:String {
+        if displayImages.count <= 1 {
+            return L10n.text(
+                "这是文档的最后一页，删除后将同时删除整个文档。"
+            )
+        }
+        return L10n.text(
+            "仅删除当前页，其余页面将自动重新编号。此操作无法撤销。"
+        )
+    }
+
+
+    private func deleteCurrentPage() {
+        guard !displayImages.isEmpty else { return }
+
+        if displayImages.count == 1 {
+            ScanManager.shared.deleteDocument(document)
+            dismiss()
+            return
+        }
+
+        let pageNumber = currentPage + 1
+        isPerformingPageOperation = true
+
+        Task {
+            defer { isPerformingPageOperation = false }
+
+            do {
+                let remainingPageCount = try await ScanManager.shared
+                    .deletePage(
+                        pageNumber,
+                        from:document
+                    )
+                let nextPage = min(
+                    currentPage,
+                    max(remainingPageCount - 1, 0)
+                )
+                loadImages()
+                currentPage = nextPage
+            }
+            catch {
+                pageOperationErrorMessage = error.localizedDescription
+            }
+        }
     }
     
     
@@ -537,7 +749,7 @@ struct ScanDetailView: View {
         DateFormatter()
         
         formatter.dateFormat =
-        "yyyyMMdd HH:mm"
+        "yyyy/MM/dd HH:mm"
         
         return formatter.string(
             from:date
@@ -696,6 +908,10 @@ struct ScanDetailView: View {
                 from:folder,
                 pageCount:pageCount
             )
+            userConfirmedOrientations = loadOrientationLocks(
+                from:folder,
+                pageCount:pageCount
+            )
             
             
         }
@@ -834,6 +1050,30 @@ struct ScanDetailView: View {
         return result
 
 
+    }
+
+
+    private func loadOrientationLocks(
+        from folder:URL,
+        pageCount:Int
+    )->[Bool] {
+        var result = Array(repeating:false, count:pageCount)
+        let metadataURL = folder.appendingPathComponent(
+            "scan_metadata.json"
+        )
+        guard let data = try? Data(contentsOf:metadataURL),
+              let metadata = try? JSONDecoder().decode(
+                [ScanPageMetadata].self,
+                from:data
+              ) else { return result }
+
+        for item in metadata {
+            let index = item.pageNumber - 1
+            if result.indices.contains(index) {
+                result[index] = item.userConfirmedOrientation ?? false
+            }
+        }
+        return result
     }
 
 
@@ -1174,7 +1414,10 @@ struct ScanDetailView: View {
             rgbImage:image,
             pageNumber:index + 1,
             captureCorners:detectedCorners.indices.contains(index)
-                ? detectedCorners[index] : nil
+                ? detectedCorners[index] : nil,
+            allowsSemanticRotation:
+                !(userConfirmedOrientations.indices.contains(index)
+                    && userConfirmedOrientations[index])
         ) { output in
 
             guard detailEnhancementTokens[index] == token,
@@ -1498,6 +1741,16 @@ struct ScanDetailView: View {
         // 保存用户最终确认的四角，而不是重新识别出的初始四角。
         detectedCorners[index] = result.corners
 
+        if !userConfirmedOrientations.indices.contains(index) {
+            userConfirmedOrientations.append(
+                contentsOf:Array(
+                    repeating:false,
+                    count:index - userConfirmedOrientations.count + 1
+                )
+            )
+        }
+        userConfirmedOrientations[index] = true
+
         saveCorners()
 
         if let structuredURL = structuredOCRURL(at:index) {
@@ -1534,7 +1787,10 @@ struct ScanDetailView: View {
 
         let pageCount = max(
             detectedCorners.count,
-            max(pageFilters.count, displayImages.count)
+            max(
+                userConfirmedOrientations.count,
+                max(pageFilters.count, displayImages.count)
+            )
         )
         let metadata = (0..<pageCount).map { index in
             ScanPageMetadata(
@@ -1542,7 +1798,10 @@ struct ScanDetailView: View {
                 corners:detectedCorners.indices.contains(index)
                     ? detectedCorners[index]
                     : nil,
-                filter:filterForPage(index)
+                filter:filterForPage(index),
+                userConfirmedOrientation:
+                    userConfirmedOrientations.indices.contains(index)
+                        ? userConfirmedOrientations[index] : false
             )
         }
 
@@ -1627,106 +1886,88 @@ struct ScanDetailView: View {
 
 
 
-    private func generatePDF(
-        for document: ScanEntity
-    ) -> URL? {
-        
-        
-        guard let folderURL = ScanManager.shared.folderURL(
-            for:document
-        )
-        else {
-            
-            return nil
-            
-        }
-        
-        
-        let pdfURL =
-        folderURL.appendingPathComponent(
-            "\(document.title ?? L10n.text("扫描文档")).pdf"
-        )
-        
-        
-        let imageURLs = displayImageURLs.isEmpty
-            ? originalImageURLs
-            : displayImageURLs
+    private func sharePDFDocument() {
+        guard !isPreparingShare else { return }
 
+        do {
+            let reference = try currentFileReference()
+            isPreparingShare = true
 
-        let fallbackImages = displayImages.isEmpty
-            ? originalImages
-            : displayImages
-        
-        
-        guard !imageURLs.isEmpty || !fallbackImages.isEmpty else {
-            
-            return nil
-            
-        }
-        
-        
-        
-        UIGraphicsBeginPDFContextToFile(
-            pdfURL.path,
-            .zero,
-            nil
-        )
-        
-        
-        
-        if !imageURLs.isEmpty {
+            Task {
+                do {
+                    let url = try await Task.detached(
+                        priority:.userInitiated
+                    ) {
+                        try PDFManager.generatePDF(
+                            in:reference.folderURL,
+                            title:reference.title
+                        )
+                    }.value
 
-            for index in imageURLs.indices {
-                autoreleasepool {
-                    let image = UIImage(
-                        contentsOfFile:imageURLs[index].path
-                    ) ?? (
-                        fallbackImages.indices.contains(index)
-                            ? fallbackImages[index]
-                            : nil
-                    )
-
-                    guard let image else {
-                        return
+                    await MainActor.run {
+                        isPreparingShare = false
+                        shareItem = ShareItem(urls:[url])
                     }
-
-                    drawPDFPage(for:image)
+                }
+                catch {
+                    await MainActor.run {
+                        isPreparingShare = false
+                        presentExportError(error.localizedDescription)
+                    }
                 }
             }
-
         }
+        catch {
+            presentExportError(error.localizedDescription)
+        }
+    }
+
+
+    private func shareJPGDocument() {
+        guard !isPreparingShare else { return }
+
+        do {
+            let reference = try currentFileReference()
+            isPreparingShare = true
+
+            Task {
+                do {
+                    let urls = try await Task.detached(
+                        priority:.userInitiated
+                    ) {
+                        try JPGExportService.exportDocuments([reference])
+                    }.value
+
+                    await MainActor.run {
+                        isPreparingShare = false
+                        shareItem = ShareItem(urls:urls)
+                    }
+                }
+                catch {
+                    await MainActor.run {
+                        isPreparingShare = false
+                        presentExportError(error.localizedDescription)
+                    }
+                }
+            }
+        }
+        catch {
+            presentExportError(error.localizedDescription)
+        }
+    }
+
+
+    private func currentFileReference(
+    ) throws->ScanDocumentFileReference {
+        guard let reference = try ScanManager.shared
+            .fileReferences(for:[document])
+            .first
         else {
-
-            for image in fallbackImages {
-                autoreleasepool {
-                    drawPDFPage(for:image)
-                }
-            }
-
-        }
-        
-        
-        
-        UIGraphicsEndPDFContext()
-        
-        
-        if FileManager.default.fileExists(
-            atPath:
-                pdfURL.path
-        ){
-            
-            print(
-                "PDF生成成功:",
-                pdfURL.path
+            throw ScanFileOperationError.unreadableDocument(
+                document.title ?? L10n.text("未命名文档")
             )
-            
-            return pdfURL
-            
         }
-        
-        
-        return nil
-        
+        return reference
     }
 
 
@@ -1737,7 +1978,7 @@ struct ScanDetailView: View {
         guard let folderURL = ScanManager.shared.folderURL(
             for:document
         ) else {
-            presentWordExportError(
+            presentExportError(
                 L10n.text("无法读取当前扫描文件夹。")
             )
             return
@@ -1758,56 +1999,21 @@ struct ScanDetailView: View {
                 document:scanDocument,
                 to:folderURL
             )
-            shareItem = ShareItem(url:url)
+            shareItem = ShareItem(urls:[url])
         }
         catch {
-            presentWordExportError(
+            presentExportError(
                 error.localizedDescription
             )
         }
     }
 
 
-    private func presentWordExportError(
+    private func presentExportError(
         _ message:String
     ) {
-        wordExportError = message
-        showWordExportError = true
-    }
-
-
-    private func drawPDFPage(
-        for image:UIImage
-    ) {
-
-        let page = CGRect(
-            x:0,
-            y:0,
-            width:595,
-            height:842
-        )
-
-        UIGraphicsBeginPDFPageWithInfo(
-            page,
-            nil
-        )
-
-        let scale = min(
-            page.width / image.size.width,
-            page.height / image.size.height
-        )
-        let size = CGSize(
-            width:image.size.width * scale,
-            height:image.size.height * scale
-        )
-        let rect = CGRect(
-            x:(page.width - size.width) / 2,
-            y:(page.height - size.height) / 2,
-            width:size.width,
-            height:size.height
-        )
-
-        image.draw(in:rect)
+        exportErrorMessage = message
+        showExportError = true
     }
 
 
@@ -1868,7 +2074,7 @@ struct ScanDetailView: View {
 
 private struct ShareItem: Identifiable {
     let id = UUID()
-    let url: URL
+    let urls:[URL]
 }
 
 

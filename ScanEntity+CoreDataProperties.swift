@@ -23,6 +23,7 @@ extension ScanEntity {
     @NSManaged public var createdAt: Date?
     @NSManaged public var folderPath: String?
     @NSManaged public var searchableText: String?
+    @NSManaged public var parentFolder: ScanFolderEntity?
 
 }
 

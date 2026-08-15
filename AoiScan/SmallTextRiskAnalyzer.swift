@@ -44,23 +44,25 @@ enum SmallTextRiskAnalyzer {
     static func analyze(
         image:UIImage,
         corners:ScanCorners?,
-        visualQuality:CaptureFrameQuality
+        visualQuality:CaptureFrameQuality,
+        precomputedTextRectangles:[CGRect]? = nil
     )->SmallTextRiskResult {
         let startedAt = Date()
-        let observations = detectTextRegions(in:image)
-        let heights = observations.map { $0.boundingBox.height }
+        let rectangles = precomputedTextRectangles
+            ?? detectTextRegions(in:image).map(\.boundingBox)
+        let heights = rectangles.map(\.height)
         let medianHeight = median(heights)
         let smallHeightLimit = min(max(medianHeight * 1.12, 0.014), 0.032)
-        let small = observations.filter {
-            $0.boundingBox.height <= smallHeightLimit
+        let small = rectangles.filter {
+            $0.height <= smallHeightLimit
         }
-        let top = observations.filter {
-            $0.boundingBox.midY >= 0.52
+        let top = rectangles.filter {
+            $0.midY >= 0.52
         }
         let topSmall = top.filter {
-            $0.boundingBox.height <= smallHeightLimit
+            $0.height <= smallHeightLimit
         }
-        let count = observations.count
+        let count = rectangles.count
         let smallRatio = ratio(small.count, count)
         let topConcentration = ratio(top.count, count)
         let topSmallRatio = ratio(topSmall.count, max(top.count, 1))

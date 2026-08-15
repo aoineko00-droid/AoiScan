@@ -7,6 +7,18 @@ import Foundation
 import UIKit
 
 
+struct AutomaticCropSafetyAssessment {
+    let isSafe:Bool
+    let baseGeometrySafe:Bool
+    let minimumCoverage:CGFloat
+    let referenceCoverage:CGFloat?
+    let completenessConfirmed:Bool
+    let firstRejectedMetric:String?
+    let firstRejectedMetricValue:CGFloat?
+    let firstRejectedMetricThreshold:CGFloat?
+}
+
+
 struct GeometryQualityAnalyzer {
     func analyze(
         corners:ScanCorners,
@@ -70,14 +82,142 @@ struct GeometryQualityAnalyzer {
     }
 
     func isSafe(_ metrics:RecoveryGeometryMetrics)->Bool {
+        isBaseSafe(metrics, maximumOutputScale:1.35)
+    }
+
+    private func isBaseSafe(
+        _ metrics:RecoveryGeometryMetrics,
+        maximumOutputScale:CGFloat
+    )->Bool {
         metrics.cornersAreConvex
             && metrics.cornersAreInsideImage
             && metrics.documentCoverage >= 0.03
             && metrics.topBottomWidthRatio >= 0.55
             && metrics.leftRightHeightRatio >= 0.55
-            && metrics.outputScale <= 1.35
+            && metrics.outputScale <= maximumOutputScale
             && metrics.outputAspectRatio >= 0.20
             && metrics.outputAspectRatio <= 5.0
+    }
+
+    private func firstRejectedMetric(
+        _ metrics:RecoveryGeometryMetrics,
+        maximumOutputScale:CGFloat
+    )->(String, CGFloat, CGFloat)? {
+        if !metrics.cornersAreConvex {
+            return ("cornersConvex", metrics.cornersAreConvex ? 1 : 0, 1)
+        }
+        if !metrics.cornersAreInsideImage {
+            return ("cornersInsideImage", 0, 1)
+        }
+        if metrics.documentCoverage < 0.03 {
+            return ("coverage", metrics.documentCoverage, 0.03)
+        }
+        if metrics.topBottomWidthRatio < 0.55 {
+            return ("topBottomWidthRatio", metrics.topBottomWidthRatio, 0.55)
+        }
+        if metrics.leftRightHeightRatio < 0.55 {
+            return ("leftRightHeightRatio", metrics.leftRightHeightRatio, 0.55)
+        }
+        if metrics.outputScale > maximumOutputScale {
+            return ("outputScale", metrics.outputScale, maximumOutputScale)
+        }
+        if metrics.outputAspectRatio < 0.20 {
+            return ("aspectRatio", metrics.outputAspectRatio, 0.20)
+        }
+        if metrics.outputAspectRatio > 5.0 {
+            return ("aspectRatio", metrics.outputAspectRatio, 5.0)
+        }
+        return nil
+    }
+
+    func assessAutomaticCrop(
+        _ metrics:RecoveryGeometryMetrics,
+        stableReferenceCorners:ScanCorners?,
+        smallCandidateCompletenessConfirmed:Bool = false,
+        requiresExplicitCompletenessEvidence:Bool = false
+    )->AutomaticCropSafetyAssessment {
+        // A completeness-confirmed small sheet can legitimately produce a larger
+        // rectified output scale because a small trapezoid is expanded to its
+        // full document resolution. Keep the ordinary 1.35 ceiling for every
+        // other path. Edge distance remains diagnostic only: a complete page
+        // near the camera boundary naturally has a small inset.
+        let maximumOutputScale:CGFloat = smallCandidateCompletenessConfirmed
+            ? 1.85 : 1.35
+        let baseGeometrySafe = isBaseSafe(
+            metrics,
+            maximumOutputScale:maximumOutputScale
+        )
+        let referenceCoverage = stableReferenceCorners.map {
+            polygonArea($0)
+        }
+        // A small, high-confidence Vision rectangle can be a text box or a
+        // table inside the page. Without a stable reference, prefer keeping
+        // the complete photo over automatically discarding most of it. With
+        // a stable reference, allow perspective variation but reject a crop
+        // that retains less than 55% of the referenced document area.
+        let minimumCoverage:CGFloat
+        if let referenceCoverage,
+           referenceCoverage >= 0.03 {
+            minimumCoverage = max(
+                smallCandidateCompletenessConfirmed ? 0.12 : 0.15,
+                referenceCoverage * 0.55
+            )
+        }
+        else {
+            minimumCoverage = smallCandidateCompletenessConfirmed
+                ? 0.12 : 0.15
+        }
+        // Strict/stable candidates may use the existing area completeness
+        // check. A fallback rectangle must carry explicit outer-page and text
+        // evidence; area alone can describe an internal table just as easily.
+        let completenessConfirmed = requiresExplicitCompletenessEvidence
+            ? smallCandidateCompletenessConfirmed
+            : metrics.documentCoverage >= 0.25
+                || smallCandidateCompletenessConfirmed
+
+        let baseReject = firstRejectedMetric(
+            metrics,
+            maximumOutputScale:maximumOutputScale
+        )
+        let isSafe = baseGeometrySafe
+            && metrics.documentCoverage >= minimumCoverage
+            && completenessConfirmed
+
+        var firstReject:(String, CGFloat, CGFloat)?
+        if let baseReject {
+            firstReject = baseReject
+        }
+        else if metrics.documentCoverage < minimumCoverage {
+            firstReject = (
+                "minimumCoverage",
+                metrics.documentCoverage,
+                minimumCoverage
+            )
+        }
+        else if !completenessConfirmed {
+            firstReject = requiresExplicitCompletenessEvidence
+                ? (
+                    "completePageEvidence",
+                    smallCandidateCompletenessConfirmed ? 1 : 0,
+                    1
+                )
+                : (
+                    "completenessConfirmed",
+                    metrics.documentCoverage,
+                    0.25
+                )
+        }
+
+        return AutomaticCropSafetyAssessment(
+            isSafe:isSafe,
+            baseGeometrySafe:baseGeometrySafe,
+            minimumCoverage:minimumCoverage,
+            referenceCoverage:referenceCoverage,
+            completenessConfirmed:completenessConfirmed,
+            firstRejectedMetric:firstReject?.0,
+            firstRejectedMetricValue:firstReject?.1,
+            firstRejectedMetricThreshold:firstReject?.2
+        )
     }
 
     func averageCornerDistance(
